@@ -1,7 +1,11 @@
 # ADR-002: Lokální historická dry/wet baseline místo globálních konstant
 
-**Stav:** Přijato, cross-field srovnání zamítnuto jako metodologicky
-nevhodné, čeká na multi-sensor korekci | **Datum:** 2026-08-30
+**Stav:** Lokální baseline + medián-z-let přijato a živě ověřeno. Cross-field
+srovnání zůstává mimo rozsah metody (relative_moisture_pct je per-location
+index, ne cross-comparable veličina — viz "Metodologický obrat" níže).
+NDVI hradlo implementováno, funguje, ale neřešilo dnešní pozorovanou
+anomálii (byla to drsnost povrchu/mokrá půda, ne vegetace) — prahy
+nekalibrované, potřeba víc validačních polí. | **Datum:** 2026-08-30
 
 Souhrnná verze tohoto dokumentu (case study pro netechnickou/investorskou
 audienci) je publikovaná jako artefakt "Ground Truth" — stejná fakta, jiná
@@ -83,6 +87,11 @@ ani obrácen na tichý pass — dokumentuje otevřený problém, ne fixed stav.
 
 ## Pokus o opravu: sezónní okno napříč lety (2026-08-30, pokračování)
 
+**OPRAVA (2026-08-30, viz sekce "NDVI hradlo padlo pod vlastní kontrolou"
+níže):** Hypotéza níže — "hustá vegetace v plné biomase" — byla **vyvrácena**
+skutečným NDVI měřením. Text nechávám neupravený jako záznam uvažování v
+danou chvíli, ne proto, že platí.
+
 Hypotéza po nálezu z předchozí sekce: `HistoricalBaselineCalculator` bral
 prostý rolling 365denní lookback, který u kontrolního pole namíchal do
 percentilu měsíce s Ïƒâ° kolem -4 až -6 dB (srpen–říjen 2025) — extrémně
@@ -138,6 +147,53 @@ fyzika povrchové vrstvy, je to signál nestabilního percentilového odhadu
 na malém vzorku (±21denní okno × 5 let dává často jen 40–90 scén). Tohle je
 POSLEDNÍ otevřená vrstva zjištěná dnes — neopravena, zdokumentována.
 
+## NDVI hradlo padlo pod vlastní kontrolou (2026-08-30, pozdější stejný den)
+
+Postavili jsme `engine/datasources/sentinel2_cdse.py` (Sentinel-2 L2A NDVI
+přes CDSE Statistical API, se SCL maskováním mraků) a zapojili ho do
+`HistoricalBaselineCalculator` jako volitelné hradlo — vyřadit z reference
+scény, kde nejbližší NDVI ukazuje hustý porost. Živě ověřeno a funkční
+(SCL maska i "NaN"-jako-string edge case z API opraveny na základě
+skutečné odpovědi).
+
+**Po zapojení hradla se cross-field test PŘESTO nezlepšil** (58,0 % vs.
+48,7 %, pořád obráceně) a `dense_vegetation_scenes_excluded` vyřadilo ~40 %
+scén u obou polí, ale `wet_db` kontrolního pole se sotva pohnulo (-4,77 →
+-4,65 dB). To byl signál, že hradlo míří na špatnou věc.
+
+**Přímá kontrola dat, ne další domněnka:** stáhli jsme S1 i NDVI časovou
+řadu pro přesně to anomální období (30. 8. – 18. 9. 2025, kontrolní pole).
+NDVI v tomhle období bylo **0,13–0,31 a klesající** — přesně tehdy, kdy
+Ïâ° vyskočilo z -13 na -3,5 dB. To je **opak** toho, co by predikovala
+hypotéza "hustá vegetace": hustá vegetace = vysoké NDVI, ne nízké.
+
+**Hypotéza "osevní postup / hustá vegetace" z předchozích dvou sekcí je
+tímto vyvrácena.** Byla to hádka podložená jen tvarem čísel (extrémní dB
+hodnoty "vypadaly jako" vegetace), nikdy ověřená proti skutečné vegetaci —
+a když se ověřila, nesedí.
+
+**Přeformulovaná diagnóza:** nízké NDVI + extrémně vysoký Ïâ° na orné půdě
+těsně po žních ukazuje spíš na **drsnost povrchu** (čerstvě zorané pole)
+nebo **mokrou půdu po dešti těsně po sklizni** — obojí zvyšuje odraz
+nezávisle na vegetaci. Z dostupných dat to nejde spolehlivě rozlišit.
+
+**Důležitější posun:** tahle anomálie leží PŘESNĚ v sezónním okně, které
+používáme jako referenci (konec srpna–začátek září, stejné jako naše cílové
+datum) — není to "jiná sezóna", je to "stejná sezóna, jiný — anomální —
+rok". Sezónní okno (oprava výše) ji proto nemohlo odfiltrovat a ani
+nemělo, dělá přesně to, co má. Problém je jinde: **jeden anomální rok
+(2025) dominuje pooled percentil** napříč všemi scénami z 5 let sloučenými
+do jednoho pole hodnot. Desítky scén z jednoho výjimečného roku pak mají
+v percentilu větší váhu než měly mít.
+
+**Navrhovaná oprava (neimplementováno v tomto ADR, další krok):** počítat
+percentil **per rok** a vzít **medián z pěti ročních percentilů**, ne
+percentil z jednoho poolu všech scén napříč lety. Jeden anomální rok pak
+přispěje jedním bodem do mediánu pěti hodnot, ne desítkami scén do poolu
+stovek. Statisticky odolnější proti přesně tomuto pozorovanému selhání,
+a nezávisí na tom, jestli se podaří správně diagnostikovat drsnost vs.
+déšť jako přesnou fyzikální příčinu.
+
 ## Zbývající, NEVYŘEŠENÁ mezera — a proč to není další kalibrační bug
 
 68,8 % / "mild" pořád není "extrémní sucho" z Intersucho. Nejpravděpodobnější
@@ -161,18 +217,53 @@ další ladění konstant proti němu by bylo overfitting. Místo toho:
    až nízké desítky sekund per request, K let × ~6týdenní okno) — před
    produkčním nasazením nutně cachovat per-AOI (Fáze 3, Supabase).
 
-## Co je skutečně potřeba k uzavření (aktualizováno po sezónní/temporal iteraci)
+## Medián ročních percentilů — implementováno a živě otestováno
 
-1. **Multi-sensor fúze (Sentinel-2 NDVI)** — operacionalizovat "NEPLATÍ PRO
-   hustou vegetaci" jako skutečné hradlo: vyřadit z historické reference i
-   z aktuálního okna scény, kde NDVI ze stejného období indikuje hustý
-   porost, místo aby to zůstalo jen věta v docstringu.
-2. **Delší archiv / víc let** — zúžit interval spolehlivosti percentilového
-   odhadu, který dnes na úzkém sezónním okně dává nestabilní časovou řadu
-   (viz sekce výše).
-3. **Per-pixel s incidence-angle korekcí** — skutečná TU Wien implementace
-   pracuje na úrovni pixelu, ne zonální statistiky přes celé AOI, a
-   normalizuje na referenční úhel dopadu. Naše zonální statistika mixuje
-   ascending/descending orbity bez korekce.
-4. **Víc validačních polí** — tři pole a jeden region nestačí na statistický
-   závěr o volbě percentilu ani o tom, jestli je metodika obecně platná.
+`HistoricalBaselineCalculator.compute()` přepsán: percentil se počítá PER
+ROK (potřeba ≥`MIN_SCENES_PER_YEAR=8` scén v tom roce, jinak se rok
+nepočítá), referencí je MEDIÁN z ročních percentilů, ne pooled percentil
+ze všech scén napříč lety. Unit test `test_one_anomalous_year_does_not_
+dominate_reference` to hlídá: syntetický anomální rok se 40 extrémními
+scénami (víc než všechny ostatní roky dohromady) neposune referenci —
+pooled percentil by tomu roku dal disproporční váhu, medián dá jednu.
+
+**Živý test na obou polích s NDVI hradlem + medián-z-let zapnutými
+zároveň:** kontrolní pole spočítalo referenci (52,3 %, moderate). Suché
+pole **spadlo do `InsufficientHistory`** — NDVI hradlo (práh 0,35) mu
+vyřadilo 30 scén, protože ozimá pšenice v suchém regionu běžně dosahuje
+NDVI přes 0,35 i ve vodním stresu (řídnoucí, ale živý porost), takže po
+kombinaci NDVI hradla a `MIN_SCENES_PER_YEAR=8` zbyly jen 2 kvalifikované
+roky z 5, pod hranicí `MIN_YEARS_FOR_MEDIAN=3`.
+
+**Tohle je správné chování systému, ne bug** — když nemáme dost čistého
+signálu na důvěryhodný odhad, systém spadne na `global_fallback` a řekne
+to (`reference_source` v response), místo aby tiše vrátil nespolehlivé
+číslo. Přesně tenhle fail-safe (ne fail-silent) reflex je to, co jsme celý
+den stavěli.
+
+**Rozhodnutí: zastavit se tady na dnes.** Další utahování prahů
+(`DENSE_VEGETATION_NDVI_THRESHOLD`, `MIN_SCENES_PER_YEAR`) jen proti
+téhle dvojici polí by bylo přesně to přeučení na jeden test case, které
+jsme si celý den zakazovali. Cross-field validace zůstává neuzavřená —
+zdokumentovaná jako otevřený, ne skrytý, stav.
+
+## Co je skutečně potřeba k uzavření (aktualizováno po medián-z-let iteraci)
+
+1. ~~Medián ročních percentilů~~ — **hotovo, implementováno, unit test i
+   živě ověřeno.** Chová se správně (fail-safe na `InsufficientHistory`,
+   ne fail-silent na špatné číslo) — viz sekce výše.
+2. ~~Multi-sensor fúze (Sentinel-2 NDVI)~~ — **hotovo, funguje, ale
+   neřešilo skutečnou příčinu anomálie.** Zůstává v kódu jako reálné
+   vegetační hradlo pro případy, kdy vegetace opravdu je příčina.
+3. **Kalibrace `DENSE_VEGETATION_NDVI_THRESHOLD` a `MIN_SCENES_PER_YEAR`
+   napříč víc poli** — 0,35 je konzervativní hodnota z literatury, ne
+   vyladěná na naše dvě pole. Se dvěma poli je teď buď moc přísná (suché
+   pole spadlo na `InsufficientHistory`), nebo moc mírná (nevíme). Potřeba
+   víc polí, aby šlo tohle rozumně nastavit, ne hádat.
+4. **Delší archiv / víc let** — víc než 5 vzorků na medián, širší základna
+   pro odhad, jestli je aktuální nastavení prahů rozumné.
+5. **Per-pixel s incidence-angle korekcí** — skutečná TU Wien implementace
+   pracuje na úrovni pixelu, ne zonální statistiky přes celé AOI.
+6. **Víc validačních polí** — tři pole a jeden region nestačí na statistický
+   závěr o volbě percentilu, prahů, ani o tom, jestli je metodika obecně
+   platná.

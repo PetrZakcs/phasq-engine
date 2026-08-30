@@ -12,11 +12,10 @@ zavolat live proti https://sh.dataspace.copernicus.eu/api/v1/statistics s
 platnými credentials a opravit payload/parsing podle skutečné odpovědi.
 """
 
-import time
-
 import httpx
 
 from engine.datasources.base import DataSource, SAR_Scene, ROIStats, MaxAOIExceeded
+from utils.cdse_auth import CDSETokenProvider
 from utils.geometry import polygon_area_ha
 from utils.reproject import reproject_geometry_to_utm
 
@@ -33,33 +32,11 @@ class Sentinel1CDSESource(DataSource):
     COLLECTION_ID = "sentinel-1-grd"
 
     def __init__(self, client_id: str, client_secret: str, token_url: str, stats_api_url: str):
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._token_url = token_url
+        self._token_provider = CDSETokenProvider(client_id, client_secret, token_url)
         self._stats_api_url = stats_api_url
-        self._token: str | None = None
-        self._token_expires_at: float = 0.0
 
     async def _get_token(self) -> str:
-        """OAuth2 client_credentials grant proti CDSE identity provideru (Keycloak)."""
-        if self._token and time.monotonic() < self._token_expires_at - 30:
-            return self._token
-
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                self._token_url,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                },
-            )
-            resp.raise_for_status()
-            payload = resp.json()
-
-        self._token = payload["access_token"]
-        self._token_expires_at = time.monotonic() + float(payload.get("expires_in", 300))
-        return self._token
+        return await self._token_provider.get_token()
 
     async def get_scenes(
         self,

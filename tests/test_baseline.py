@@ -25,7 +25,7 @@ def _seasonal_scenes(years: list[int], values_per_year: int, mean_db_fn, day_off
 
 
 def test_insufficient_history_raises():
-    # jen 2 roky × 3 scény = 6, MIN_HISTORICAL_SCENES=20
+    # 2 roky × 3 scény, MIN_SCENES_PER_YEAR=8 -> ani jeden rok se nekvalifikuje
     scenes = _seasonal_scenes([2024, 2025], 3, lambda y, i: -15.0)
     source = FakeDataSource(scenes)
     calc = HistoricalBaselineCalculator(source, lookback_years=5, seasonal_window_days=21)
@@ -34,7 +34,13 @@ def test_insufficient_history_raises():
         asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
 
 
-def test_percentile_reference_matches_numpy():
+def test_median_of_per_year_percentiles_matches_manual_calc():
+    """
+    Referenci počítáme jako MEDIÁN z ROČNÍCH percentilů, ne percentil z
+    jednoho poolu všech scén napříč lety (viz ADR-002 "NDVI hradlo padlo
+    pod vlastní kontrolou" — pooled percentil je zranitelný vůči jednomu
+    anomálnímu roku).
+    """
     values = list(np.linspace(-20.0, -5.0, 60))
     years = [2021, 2022, 2023, 2024, 2025]
 
@@ -48,11 +54,34 @@ def test_percentile_reference_matches_numpy():
 
     ref = asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
 
-    all_used = [mean_db_fn(y, i) for y in years for i in range(12)]
-    assert ref.dry_db == pytest.approx(np.percentile(all_used, 5.0), abs=0.01)
-    assert ref.wet_db == pytest.approx(np.percentile(all_used, 95.0), abs=0.01)
+    per_year_dry = [np.percentile([mean_db_fn(y, i) for i in range(12)], 5.0) for y in years]
+    per_year_wet = [np.percentile([mean_db_fn(y, i) for i in range(12)], 95.0) for y in years]
+    assert ref.dry_db == pytest.approx(np.median(per_year_dry), abs=0.01)
+    assert ref.wet_db == pytest.approx(np.median(per_year_wet), abs=0.01)
     assert ref.scenes_used == 60
     assert sorted(ref.years_used) == years
+
+
+def test_one_anomalous_year_does_not_dominate_reference():
+    """
+    Regresní test na skutečný živý nález (ADR-002): jeden rok s extrémně
+    vysokými hodnotami (drsnost povrchu / mokrá půda po žních, ne vegetace
+    — NDVI hradlo tohle nezachytí) nesmí přetáhnout referenci, i když ten
+    rok sám o sobě má víc scén než ostatní roky dohromady.
+    """
+    normal_years = _seasonal_scenes([2022, 2023, 2024, 2025], 10, lambda y, i: -12.0)
+    # jeden anomální rok, 40 scén (víc než součet ostatních), extrémně vysoké hodnoty
+    anomalous_year = _seasonal_scenes([2021], 40, lambda y, i: -4.0)
+
+    source = FakeDataSource(normal_years + anomalous_year)
+    calc = HistoricalBaselineCalculator(source, lookback_years=5, seasonal_window_days=21, dry_percentile=5.0, wet_percentile=95.0)
+
+    ref = asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
+
+    # Pooled percentil (starý způsob) by tady dal wet_db blízko -4.0 (40 z 80
+    # scén je -4.0). Medián z 5 ročních percentilů dá medián(-12,-12,-12,-12,-4) = -12.0.
+    assert ref.wet_db == pytest.approx(-12.0, abs=0.01)
+    assert ref.dry_db == pytest.approx(-12.0, abs=0.01)
 
 
 def test_never_includes_current_year():
