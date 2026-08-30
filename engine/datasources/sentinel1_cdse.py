@@ -13,12 +13,12 @@ platnými credentials a opravit payload/parsing podle skutečné odpovědi.
 """
 
 import time
-from datetime import datetime, timezone
 
 import httpx
 
 from engine.datasources.base import DataSource, SAR_Scene, ROIStats, MaxAOIExceeded
 from utils.geometry import polygon_area_ha
+from utils.reproject import reproject_geometry_to_utm
 
 # MVP limit — dokud nemáme ověřené chování Statistical API na velkých AOI.
 # Zvednout jen po testu na reálném velkém poli, ne odhadem.
@@ -77,8 +77,9 @@ class Sentinel1CDSESource(DataSource):
                 f"{self.source_name}. Zvětšit limit jen po ověřeném testu."
             )
 
+        band = polarizations[0] if polarizations else "VV"
         token = await self._get_token()
-        payload = self._build_request_payload(geometry, date_start, date_end, polarizations, orbit_direction)
+        payload = self._build_request_payload(geometry, date_start, date_end, band, orbit_direction)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -89,23 +90,25 @@ class Sentinel1CDSESource(DataSource):
             resp.raise_for_status()
             raw = resp.json()
 
-        return self._parse_stats_response(raw, geometry, polarizations[0] if polarizations else "VV")
+        return self._parse_stats_response(raw, geometry, band)
 
     async def get_scene_count(self, geometry: dict, date_start: str, date_end: str) -> int:
         scenes = await self.get_scenes(geometry, date_start, date_end)
         return len(scenes)
 
     def _build_request_payload(
-        self, geometry: dict, date_start: str, date_end: str, polarizations: list[str], orbit_direction: str
+        self, geometry: dict, date_start: str, date_end: str, band: str, orbit_direction: str
     ) -> dict:
-        # TODO(ověřit proti live API): dataFilter klíče, hodnoty polarization/
-        # acquisitionMode a přesná struktura "aggregation" bloku pro Statistical API.
-        evalscript = _VV_BACKSCATTER_DB_EVALSCRIPT
+        # Bounds musí být v metrickém CRS — resx/resy jsou v jednotkách bounds
+        # CRS. Ověřeno živě 2026-08-30: s EPSG:4326 (stupně) a resx=10 spadne
+        # celé AOI do jednoho pixelu (sampleCount=1). Viz utils/reproject.py.
+        utm_geometry, epsg = reproject_geometry_to_utm(geometry)
+
         return {
             "input": {
                 "bounds": {
-                    "geometry": geometry,
-                    "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
+                    "geometry": utm_geometry,
+                    "properties": {"crs": f"http://www.opengis.net/def/crs/EPSG/0/{epsg}"},
                 },
                 "data": [
                     {
@@ -131,9 +134,18 @@ class Sentinel1CDSESource(DataSource):
                     "to": f"{date_end}T23:59:59Z",
                 },
                 "aggregationInterval": {"of": "P1D"},
-                "evalscript": evalscript,
+                "evalscript": _backscatter_db_evalscript(band),
                 "resx": self.typical_resolution_m,
                 "resy": self.typical_resolution_m,
+            },
+            "calculations": {
+                "default": {
+                    "statistics": {
+                        "default": {
+                            "percentiles": {"k": [10, 90], "smoothed": False}
+                        }
+                    }
+                }
             },
         }
 
@@ -180,21 +192,26 @@ def _geometry_bbox(geometry: dict) -> tuple:
     return (min(lons), min(lats), max(lons), max(lats))
 
 
-# evalscript v3 — VV backscatter v dB. NENÍ zde per-pixel speckle filtr
-# (viz ADR-001 oprava): evaluatePixel v evalscriptu nemá garantovaný přístup
-# k sousedním pixelům, takže Refined Lee kernel zde není implementován jako fakt,
-# ne jen odloženo. Šum pro fázi 1 zmírňujeme přes percentily (p10/p90 v ROIStats)
-# a agregaci přes více scén v RadiometricAnalyzer, ne přes filtr na vstupu.
-_VV_BACKSCATTER_DB_EVALSCRIPT = """
+# evalscript v3 — backscatter v dB pro zadanou polarizaci (VV/VH). NENÍ zde
+# per-pixel speckle filtr (viz ADR-001 oprava): evaluatePixel v evalscriptu
+# nemá garantovaný přístup k sousedním pixelům, takže Refined Lee kernel zde
+# není implementován jako fakt, ne jen odloženo. Šum pro fázi 1 zmírňujeme
+# přes percentily (p10/p90 v ROIStats) a agregaci přes více scén v
+# RadiometricAnalyzer, ne přes filtr na vstupu.
+def _backscatter_db_evalscript(band: str) -> str:
+    return f"""
 //VERSION=3
-function setup() {
-  return {
-    input: ["VV", "dataMask"],
-    output: [{ id: "default", bands: 1, sampleType: "FLOAT32" }]
-  };
-}
-function evaluatePixel(samples) {
-  let vv_db = samples.VV > 0 ? 10 * Math.log10(samples.VV) : -50;
-  return { default: [vv_db] };
-}
+function setup() {{
+  return {{
+    input: ["{band}", "dataMask"],
+    output: [
+      {{ id: "default", bands: 1, sampleType: "FLOAT32" }},
+      {{ id: "dataMask", bands: 1 }}
+    ]
+  }};
+}}
+function evaluatePixel(samples) {{
+  let val_db = samples.{band} > 0 ? 10 * Math.log10(samples.{band}) : -50;
+  return {{ default: [val_db], dataMask: [samples.dataMask] }};
+}}
 """

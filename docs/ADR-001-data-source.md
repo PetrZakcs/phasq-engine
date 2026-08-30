@@ -59,6 +59,36 @@ skutečně potřebují plné pole (custom PolSAR klasifikace, InSAR fázový roz
 si vyžádají `get_scene_arrays()` — samostatnou, dražší metodu na `DataSource`
 rozhraní, volanou jen když je to nutné.
 
+## Update 2026-08-30: živě ověřeno proti CDSE Statistical API
+
+OAuth2 client_credentials flow i Statistical API request/response kontrakt
+jsou teď ověřené živým voláním (ne jen psané z paměti). Dva reálné problémy
+nalezené a opravené při prvním testu:
+
+1. **`resx`/`resy` jsou v jednotkách bounds CRS.** S `EPSG:4326` (stupně) a
+   `resx=10` spadlo celé AOI (~0,7×0,7 km) do jediného pixelu
+   (`sampleCount=1`, `stDev=0`, `p10==p90==mean`) — API to nevrátilo jako
+   chybu, jen jako fyzikálně nesmyslná data, což je zákeřnější než 400.
+   Oprava: `utils/reproject.py` přepočítá AOI do metrického UTM před
+   voláním. Po opravě `sampleCount≈4600` pro tuto AOI, hodnoty v
+   plausibilním rozsahu.
+2. Statistical API vyžaduje explicitní `dataMask` output v evalscriptu
+   (`setup()`), jinak 400. A percentily nejsou v odpovědi default — musí se
+   vyžádat přes `calculations.default.statistics.default.percentiles`.
+
+Živý test proti mock AOI (Českomoravská vrchovina, ne ověřené zemědělské
+pole) vrátil `mean_backscatter_vv_db ≈ -6.3 dB` — nad referenční mokrou
+hodnotou (-8.0 dB) z master planu, tedy `relative_moisture_pct` sedí na
+stropu 100 %. To je pravděpodobně les/smíšený terén v testovací AOI, ne
+chyba výpočtu — modul explicitně neplatí pro hustou vegetaci. **Nejde to
+brát jako validaci fyziky** — na to potřebujeme reálný LPIS blok a
+porovnání s Intersucho.cz (viz master_plan.md Fáze 1, Den 5).
+
+Zůstává neověřeno/otevřené: `orbit_direction` není v odpovědi Statistical
+API, vrací se jako `"UNKNOWN"`; přesné chování na velkých AOI (nad
+`MAX_AOI_HA=2000`) neotestováno; skutečný Refined Lee speckle filtr pořád
+chybí (viz oprava níže).
+
 ## Co to stojí
 
 - Pomalejší start než GEE (žádné hotové `reduceRegion` pohodlí zabudované do

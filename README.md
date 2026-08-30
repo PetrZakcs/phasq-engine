@@ -10,14 +10,20 @@ Engine** — důvod a důsledky v [docs/ADR-001-data-source.md](docs/ADR-001-dat
 ## Stav (2026-08-30)
 
 Fáze 1 spike: `Sentinel1CDSESource` + `RadiometricAnalyzer` fungují proti
-mock datům (viz `tests/`). **Live volání proti CDSE Statistical API zatím
-NENÍ ověřeno** — přesný JSON kontrakt v `engine/datasources/sentinel1_cdse.py`
-je psán z paměti a označen TODO komentáři. První reálný test s platnými
-credentials tohle buď potvrdí, nebo (pravděpodobněji) bude vyžadovat úpravu
-payloadu/parsování podle skutečné odpovědi API.
+mock datům i **živě proti CDSE Statistical API** (ověřeno reálným voláním,
+ne jen testy). Detaily a dvě chyby nalezené/opravené při prvním live testu
+(CRS jednotky resx/resy, chybějící dataMask output) jsou v
+[docs/ADR-001-data-source.md](docs/ADR-001-data-source.md).
+
+**Nejde to ale ještě brát jako fyzikálně validovanou analýzu** — testovací
+AOI je náhodný čtverec v Českomoravské vrchovině, pravděpodobně les, ne
+zemědělská půda, na kterou modul cílí. Další krok: reálný LPIS blok +
+porovnání s Intersucho.cz (master_plan.md Fáze 1, Den 5).
 
 Žádná Supabase integrace, žádná perzistence, žádný quota enforcement —
-to je Fáze 3 dle master plánu, záměrně zatím chybí.
+to je Fáze 3 dle master plánu, záměrně zatím chybí. `orbit_direction` se
+z Statistical API nevrací (`"UNKNOWN"`), skutečný per-pixel speckle filtr
+taky chybí (viz ADR-001).
 
 ## Setup
 
