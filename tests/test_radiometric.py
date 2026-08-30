@@ -6,11 +6,13 @@ from engine.physics.radiometric import (
     db_to_linear,
     linear_to_db,
 )
+from engine.physics.baseline import LocalReference
 from tests.fixtures.mock_scenes import (
     MOCK_GEOMETRY,
     make_dry_scene,
     make_wet_scene,
     make_low_coverage_scene,
+    make_scene,
 )
 
 
@@ -67,3 +69,34 @@ def test_mean_backscatter_db_averages_in_linear_scale():
 def test_db_linear_roundtrip():
     for db in [-30.0, -17.0, -5.0, 0.0]:
         assert linear_to_db(db_to_linear(db)) == pytest.approx(db, abs=1e-9)
+
+
+def test_local_reference_changes_verdict_vs_global_fallback():
+    """
+    Regresní test na živě nalezený nález (ADR-002): reálné pole s
+    mean_vv=-10.24 dB dostalo s globální referencí (-22/-8) "84% moisture,
+    no drought" - v rozporu s nezávisle potvrzeným extrémním suchem. S
+    lokální referencí pole (-13.72/-8.66) dostalo "68.8%, mild drought".
+    Test hlídá, že se reference_source a verdikt SKUTEČNĚ liší podle toho,
+    jestli je local_reference předaná - ne že se tiše ignoruje.
+    """
+    scenes = [make_scene("2026-08-30", -10.24)]
+    analyzer = RadiometricAnalyzer()
+
+    result_global = analyzer.analyze(scenes, MOCK_GEOMETRY, local_reference=None)
+    assert result_global["reference_source"] == "global_fallback"
+    assert result_global["drought_risk"] is False
+
+    local_ref = LocalReference(dry_db=-13.72, wet_db=-8.66, scenes_used=188, lookback_days=365)
+    result_local = analyzer.analyze(scenes, MOCK_GEOMETRY, local_reference=local_ref)
+    assert result_local["reference_source"] == "local_baseline"
+    assert result_local["drought_risk"] is True
+    assert result_local["reference_scenes_used"] == 188
+
+    # stejný vstupní signál, různý verdikt podle reference - to je celý smysl ADR-002
+    assert result_global["relative_moisture_pct"] > result_local["relative_moisture_pct"]
+
+
+def test_measurement_caveat_present_in_output():
+    result = RadiometricAnalyzer().analyze([make_wet_scene()], MOCK_GEOMETRY)
+    assert "0-5 cm" in result["measurement_caveat"]

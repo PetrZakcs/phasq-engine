@@ -11,6 +11,7 @@ from api.middleware import verify_internal_secret
 from api.models import RadiometricAnalysisRequest
 from engine.datasources.base import MaxAOIExceeded
 from engine.datasources.sentinel1_cdse import Sentinel1CDSESource
+from engine.physics.baseline import HistoricalBaselineCalculator, InsufficientHistory
 from engine.physics.radiometric import RadiometricAnalyzer
 from utils.config import settings
 
@@ -49,8 +50,22 @@ async def analyze_radiometric(req: RadiometricAnalysisRequest):
             detail=f"CDSE API error {e.response.status_code}: {e.response.text[:500]}",
         )
 
+    # Lokální dry/wet baseline (viz docs/ADR-002-local-baseline.md) — bez ní
+    # dává globální fallback fyzikálně chybné výsledky (ověřeno živě proti
+    # Intersucho.cz). POZOR: počítá se on-demand, ~4-10s navíc na request —
+    # cachování per-AOI je Fáze 3 TODO (utils/config.py, Supabase), zatím
+    # zaplacena latence za správnost, ne za rychlost.
+    local_reference = None
+    try:
+        baseline_calc = HistoricalBaselineCalculator(source)
+        local_reference = await baseline_calc.compute(req.geometry, as_of_date=req.date_end)
+    except InsufficientHistory:
+        pass  # RadiometricAnalyzer spadne na global_fallback a označí to v response
+    except httpx.HTTPStatusError:
+        pass  # baseline selhala síťově - radši global_fallback než 502 na celý request
+
     analyzer = RadiometricAnalyzer()
-    result = analyzer.analyze(scenes, req.geometry)
+    result = analyzer.analyze(scenes, req.geometry, local_reference=local_reference)
 
     if result.get("success") is False:
         raise HTTPException(status_code=422, detail=result.get("error_message"))
