@@ -87,7 +87,7 @@ def test_local_reference_changes_verdict_vs_global_fallback():
     assert result_global["reference_source"] == "global_fallback"
     assert result_global["drought_risk"] is False
 
-    local_ref = LocalReference(dry_db=-13.72, wet_db=-8.66, scenes_used=188, lookback_days=365)
+    local_ref = LocalReference(dry_db=-13.72, wet_db=-8.66, scenes_used=188, years_used=[2021, 2022, 2023, 2024, 2025], seasonal_window_days=21)
     result_local = analyzer.analyze(scenes, MOCK_GEOMETRY, local_reference=local_ref)
     assert result_local["reference_source"] == "local_baseline"
     assert result_local["drought_risk"] is True

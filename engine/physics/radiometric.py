@@ -122,7 +122,8 @@ class RadiometricAnalyzer:
             "reference_dry_db": round(dry_db, 2),
             "reference_wet_db": round(wet_db, 2),
             "reference_scenes_used": local_reference.scenes_used if local_reference else None,
-            "reference_lookback_days": local_reference.lookback_days if local_reference else None,
+            "reference_years_used": local_reference.years_used if local_reference else None,
+            "reference_seasonal_window_days": local_reference.seasonal_window_days if local_reference else None,
             "citation": "Bauer-Marschallinger et al. (2019), doi:10.3390/rs11050526",
             "spatial_resolution_m": valid_scenes[0].spatial_resolution_m,
             "measurement_caveat": (

@@ -1,6 +1,11 @@
 # ADR-002: Lokální historická dry/wet baseline místo globálních konstant
 
-**Stav:** Přijato, částečně otevřené | **Datum:** 2026-08-30
+**Stav:** Přijato, cross-field srovnání zamítnuto jako metodologicky
+nevhodné, čeká na multi-sensor korekci | **Datum:** 2026-08-30
+
+Souhrnná verze tohoto dokumentu (case study pro netechnickou/investorskou
+audienci) je publikovaná jako artefakt "Ground Truth" — stejná fakta, jiná
+forma.
 
 ## Nález (fyzikální validace, master_plan.md Fáze 1 Den 5)
 
@@ -76,6 +81,63 @@ který se dřív skrýval v jednom poli a teď se ukázal přidáním druhého.
 Regresní test je ponechán ve stavu FAILED s `xfail` a důvodem, ne smazán
 ani obrácen na tichý pass — dokumentuje otevřený problém, ne fixed stav.
 
+## Pokus o opravu: sezónní okno napříč lety (2026-08-30, pokračování)
+
+Hypotéza po nálezu z předchozí sekce: `HistoricalBaselineCalculator` bral
+prostý rolling 365denní lookback, který u kontrolního pole namíchal do
+percentilu měsíce s Ïƒâ° kolem -4 až -6 dB (srpen–říjen 2025) — extrémně
+vysoké, typické pro hustou vegetaci v plné biomase (objemový rozptyl, ne
+vlhkost), zatímco duben–srpen 2026 mělo -10 až -12 dB, srovnatelné se
+suchým polem. Potvrzeno měsíčním rozpadem historie obou polí.
+
+**Oprava:** `HistoricalBaselineCalculator` přepsán ze `lookback_days` na
+sezónní okno (`seasonal_window_days=21`) napříč `lookback_years=5` lety,
+**nikdy z aktuálního roku** (jinak by probíhající sucho zředilo vlastní
+referenci). Metodologicky správný postup — odpovídá tomu, jak se dělá
+srovnání "stejné období, jiné roky" v remote sensingu obecně.
+
+**Výsledek: cross-field regresní test (`test_drought_region_field_flags_
+higher_severity_than_control`) PŘESTO PADÁ DÁL** (61,5 % vs. 51,9 %, pořád
+obráceně). Osevní postup mění plodinu na poli rok od roku — i "stejné
+kalendářní okno napříč lety" může místo počasí zachytávat střídání plodin
+(letos ozimá pšenice v srpnovém okně, loni kukuřice ve stejném okně).
+Sezónní korekce je nutná podmínka, ne dostatečná.
+
+## Metodologický obrat: relative_moisture_pct není cross-field metrika
+
+Klíčové zjištění, který posunul celé vyšetřování: **syrová data byla celou
+dobu ve správném směru.** Aktuální Ïƒâ° kontrolního pole (-8,61 dB) je
+skutečně méně záporné (vlhčí) než suchého pole (-10,24 dB) — to je fyzikálně
+správně. Problém nebyl v datech ani ve volbě okna. Problém byl v testu
+samotném: `relative_moisture_pct` je z podstaty **relativní anomálie vůči
+vlastní historii jednoho místa** (TU Wien Soil *Water Index* — index, ne
+absolutní vlhkost), ne absolutní, mezi poli srovnatelná veličina. Dvě pole s
+různou půdou/plodinou mají různě široký přirozený dynamický rozsah Ïâ°, takže
+68 % u pole A a 58 % u pole B nejsou stejná fyzikální jednotka.
+
+**Rozhodnutí:** cross-field regresní test zůstává `xfail(strict=True)` s
+touhle poznámkou — dokumentuje, že se ptal na metodologicky nevhodnou věc,
+ne že čeká na budoucí opravu kódu. Validace se přesměrovala na to, co metoda
+skutečně měří: vývoj JEDNOHO pole v čase.
+
+**Časová validace** (`relative_moisture_pct` suchého pole napříč 2026,
+vlastní sezónní reference pro každé datum):
+
+| Datum | Vlhkost | Severity |
+|---|---|---|
+| 2026-04-15 | 20,5 % | severe |
+| 2026-05-15 | 26,0 % | severe |
+| 2026-06-15 | 62,5 % | mild |
+| 2026-07-15 | 75,1 % | none |
+| 2026-08-15 | 19,3 % | extreme |
+| 2026-08-30 | 61,5 % | mild |
+
+Tohle NENÍ čistý, hladce klesající trend odpovídající prohlubujícímu se
+suchu — je to šum. Skok z 19,3 % na 61,5 % během 15 dní není důvěryhodná
+fyzika povrchové vrstvy, je to signál nestabilního percentilového odhadu
+na malém vzorku (±21denní okno × 5 let dává často jen 40–90 scén). Tohle je
+POSLEDNÍ otevřená vrstva zjištěná dnes — neopravena, zdokumentována.
+
 ## Zbývající, NEVYŘEŠENÁ mezera — a proč to není další kalibrační bug
 
 68,8 % / "mild" pořád není "extrémní sucho" z Intersucho. Nejpravděpodobnější
@@ -95,11 +157,22 @@ další ladění konstant proti němu by bylo overfitting. Místo toho:
 1. Do API response přidán `measurement_caveat` — stejný vzor jako lavinový
    disclaimer u SnowDetector v master_plan.md 2.2, transparentnost o limitu
    místo předstírání, že SAR nahrazuje hloubkový profil.
-2. Před dalším laděním potřebujeme **víc validačních polí** (různé plodiny,
-   půdy, regiony) — jedno pole nestačí na závěr, jestli je p5/p95 ta správná
-   volba percentilu, nebo jestli je potřeba i incidence-angle korekce
-   (aktuálně mícháme ascending/descending orbity bez korekce, což do
-   historické distribuce přidává rozptyl nesouvisející s vlhkostí).
-3. `HistoricalBaselineCalculator` se dnes počítá on-demand (~4-10s per
-   request) — před produkčním nasazením nutně cachovat per-AOI (Fáze 3,
-   Supabase), ne přepočítávat při každé analýze.
+2. `HistoricalBaselineCalculator` se dnes počítá on-demand (řádově sekundy
+   až nízké desítky sekund per request, K let × ~6týdenní okno) — před
+   produkčním nasazením nutně cachovat per-AOI (Fáze 3, Supabase).
+
+## Co je skutečně potřeba k uzavření (aktualizováno po sezónní/temporal iteraci)
+
+1. **Multi-sensor fúze (Sentinel-2 NDVI)** — operacionalizovat "NEPLATÍ PRO
+   hustou vegetaci" jako skutečné hradlo: vyřadit z historické reference i
+   z aktuálního okna scény, kde NDVI ze stejného období indikuje hustý
+   porost, místo aby to zůstalo jen věta v docstringu.
+2. **Delší archiv / víc let** — zúžit interval spolehlivosti percentilového
+   odhadu, který dnes na úzkém sezónním okně dává nestabilní časovou řadu
+   (viz sekce výše).
+3. **Per-pixel s incidence-angle korekcí** — skutečná TU Wien implementace
+   pracuje na úrovni pixelu, ne zonální statistiky přes celé AOI, a
+   normalizuje na referenční úhel dopadu. Naše zonální statistika mixuje
+   ascending/descending orbity bez korekce.
+4. **Víc validačních polí** — tři pole a jeden region nestačí na statistický
+   závěr o volbě percentilu ani o tom, jestli je metodika obecně platná.
