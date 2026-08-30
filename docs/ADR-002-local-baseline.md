@@ -46,6 +46,36 @@ vylučuje hypotézu "krátké okno je náhodně zkreslené". Tohle pole má stab
 jinou přirozenou fyzikální škálu než globální konstanta, ne artefakt jednoho
 období.
 
+## Rozšířená validace: 2 další pole (2026-08-30)
+
+Aby n=1 nezůstalo jediným důkazem, přidána validace na dvou dalších reálných
+LPIS polích proti druhému nezávislému Intersucho.cz dotazu:
+
+| Pole | Region | Typ | Local moisture % | Severity | Intersucho ground truth |
+|---|---|---|---|---|---|
+| ArableLand 672112801/4 (35.6 ha) | Havlíčkobrodsko | orná půda | 68.8 % | mild | "výjimečné až extrémní sucho" |
+| ArableLand 694096602/17 (5.4 ha) | Liberecko | orná půda | 57.9 % | mild | "výrazně lepší stav" než Havlíčkobrodsko |
+| PermanentGrassland 671112507 (0.79 ha) | Havlíčkobrodsko (stejný region) | trvalý travní porost | 53.8 % | moderate | (mimo dokumentovanou platnost modulu) |
+
+**OPRAVA (automatizovaný test to odhalil, ne ruční kontrola):** Původní
+verze tohodle ADR tady tvrdila "relativní řazení mezi regiony sedí" — to
+byla chyba v mém vlastním srovnání, ne ve výsledcích. Porovnal jsem
+grassland (suchý region) s arable (kontrolní region), tedy dvě různé
+kultury napříč regiony, a z toho odvodil závěr o regionech. Když se
+porovná arable-to-arable (`tests/integration/test_cdse_live.py::
+test_drought_region_field_flags_higher_severity_than_control`), test
+PADÁ: suchý region (68.8 %) vyšel **vlhčí** než kontrolní region
+(57.9 %) — opačně, než by mělo být.
+
+To relativizuje hypotézu "měříme jen jinou hloubku" — nejde ji brát jako
+prokázanou. Otevřené alternativní vysvětlení: obě pole jsou geograficky
+daleko od sebe (jiné relativní oběžné dráhy, jiný lokální úhel dopadu),
+a `HistoricalBaselineCalculator` mixuje ascending/descending orbity bez
+incidence-angle korekce (viz "Zbývající..." níže) — to je konfound,
+který se dřív skrýval v jednom poli a teď se ukázal přidáním druhého.
+Regresní test je ponechán ve stavu FAILED s `xfail` a důvodem, ne smazán
+ani obrácen na tichý pass — dokumentuje otevřený problém, ne fixed stav.
+
 ## Zbývající, NEVYŘEŠENÁ mezera — a proč to není další kalibrační bug
 
 68,8 % / "mild" pořád není "extrémní sucho" z Intersucho. Nejpravděpodobnější
