@@ -100,3 +100,36 @@ def test_local_reference_changes_verdict_vs_global_fallback():
 def test_measurement_caveat_present_in_output():
     result = RadiometricAnalyzer().analyze([make_wet_scene()], MOCK_GEOMETRY)
     assert "0-5 cm" in result["measurement_caveat"]
+
+
+def test_root_zone_swi_damps_single_spike_more_than_surface_moisture():
+    """
+    Kořenová zóna (engine/physics/root_zone.py) musí na úrovni celého
+    RadiometricAnalyzer výstupu skutečně tlumit jednorázový výkyv víc než
+    syrová relative_moisture_pct - to je přesně ten typ šumu, co ADR-002
+    zdokumentovalo jako otevřený problém (skok 19,3 % -> 61,5 % za 15 dní).
+    """
+    scenes = [
+        make_scene("2026-06-01", -14.0),
+        make_scene("2026-06-05", -14.0),
+        make_scene("2026-06-10", -6.0),  # jednorázový výkyv (déšť/artefakt)
+        make_scene("2026-06-15", -14.0),
+        make_scene("2026-06-20", -14.0),
+    ]
+    result = RadiometricAnalyzer().analyze(scenes, MOCK_GEOMETRY)
+
+    spike_entry = result["timeseries"][2]
+    baseline_pct = result["timeseries"][0]["root_zone_swi_pct"]
+
+    surface_deviation = abs(spike_entry["vv_db"] - (-14.0))  # jen orientačně, jiná škála
+    swi_deviation_from_baseline = abs(spike_entry["root_zone_swi_pct"] - baseline_pct)
+
+    # SWI v okamžiku výkyvu se musí od klidové hodnoty odchýlit MÉNĚ než
+    # o celý rozsah global fallback škály (-22/-8 dB -> 0-100 %) by odpovídalo
+    # syrové vlhkosti ve stejném bodě.
+    spike_surface_pct = RadiometricAnalyzer()._sigma_to_moisture_pct(-6.0, -22.0, -8.0)
+    baseline_surface_pct = RadiometricAnalyzer()._sigma_to_moisture_pct(-14.0, -22.0, -8.0)
+    surface_swing = abs(spike_surface_pct - baseline_surface_pct)
+
+    assert swi_deviation_from_baseline < surface_swing
+    assert result["root_zone_swi_t_days"] == 20.0

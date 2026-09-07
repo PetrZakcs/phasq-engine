@@ -26,6 +26,7 @@ import numpy as np
 
 from engine.datasources.base import SAR_Scene
 from engine.physics.baseline import LocalReference
+from engine.physics.root_zone import compute_swi
 
 SIGMA_DRY_REF_DB = -22.0
 SIGMA_WET_REF_DB = -8.0
@@ -64,7 +65,13 @@ def mean_backscatter_db(db_values: list[float]) -> float:
 
 class RadiometricAnalyzer:
 
-    def analyze(self, scenes: list[SAR_Scene], roi_geometry: dict, local_reference: LocalReference | None = None) -> dict:
+    def analyze(
+        self,
+        scenes: list[SAR_Scene],
+        roi_geometry: dict,
+        local_reference: LocalReference | None = None,
+        swi_t_days: float = 20.0,
+    ) -> dict:
         valid_scenes = [s for s in scenes if s.roi_stats.valid_pixel_ratio >= MIN_VALID_PIXEL_RATIO]
         dropped = len(scenes) - len(valid_scenes)
 
@@ -104,6 +111,17 @@ class RadiometricAnalyzer:
         relative_moisture = self._sigma_to_moisture_pct(mean_vv, dry_db, wet_db)
         drought_risk, severity = self._assess_drought(relative_moisture)
 
+        # Kořenová zóna (viz engine/physics/root_zone.py): SWI exponenciální
+        # filtr nad per-scéna povrchovou vlhkostí, T z literatury (default
+        # 20 dní), NE lokálně kalibrované. Indikativní, ne validované číslo
+        # — proto zvlášť pole, ne smíchané do relative_moisture_pct.
+        per_scene_moisture = [self._sigma_to_moisture_pct(v, dry_db, wet_db) for v in db_values]
+        scene_dates = [s.acquisition_date for s in valid_scenes]
+        swi_series = compute_swi(scene_dates, per_scene_moisture, t_days=swi_t_days)
+        for entry, swi_val in zip(timeseries, swi_series):
+            entry["root_zone_swi_pct"] = round(swi_val, 1)
+        root_zone_swi_pct = round(swi_series[-1], 1) if swi_series else None
+
         return {
             "success": True,
             "analysis_type": "radiometric",
@@ -112,6 +130,8 @@ class RadiometricAnalyzer:
             "scenes_dropped_low_coverage": dropped,
             "mean_backscatter_vv_db": round(mean_vv, 2),
             "relative_moisture_pct": round(relative_moisture, 1),
+            "root_zone_swi_pct": root_zone_swi_pct,
+            "root_zone_swi_t_days": swi_t_days,
             "trend_db": round(trend_db, 2),
             "drought_risk": drought_risk,
             "drought_severity": severity,
@@ -127,8 +147,11 @@ class RadiometricAnalyzer:
             "citation": "Bauer-Marschallinger et al. (2019), doi:10.3390/rs11050526",
             "spatial_resolution_m": valid_scenes[0].spatial_resolution_m,
             "measurement_caveat": (
-                "Sentinel-1 C-band VV měří vlhkost svrchní vrstvy půdy (~0-5 cm), "
-                "ne hloubkový profil kořenové zóny. Pro oficiální posouzení sucha "
+                "Sentinel-1 C-band VV měří přímo jen vlhkost svrchní vrstvy půdy "
+                "(~0-5 cm). root_zone_swi_pct je časová extrapolace (Wagner et al. "
+                "1999 SWI filtr, T=" + f"{swi_t_days:.0f}" + " dní) do hlubší vrstvy "
+                "— indikativní odhad, T je hodnota z literatury, NE lokálně "
+                "kalibrovaná na české půdy. Pro oficiální posouzení sucha "
                 "konzultuj Intersucho.cz — viz docs/ADR-002-local-baseline.md."
             ),
         }

@@ -267,3 +267,26 @@ zdokumentovaná jako otevřený, ne skrytý, stav.
 6. **Víc validačních polí** — tři pole a jeden region nestačí na statistický
    závěr o volbě percentilu, prahů, ani o tom, jestli je metodika obecně
    platná.
+
+## Kořenová zóna: SWI exponenciální filtr (2026-09-07)
+
+Přidán `engine/physics/root_zone.py` — Wagner et al. (1999) rekurzivní
+SWI filtr nad per-scéna povrchovou vlhkostí, `T=20` dní (literatura,
+H-SAF), zapojený do `RadiometricAnalyzer` jako `root_zone_swi_pct` +
+per-scéna `timeseries[].root_zone_swi_pct`. 7 unit testů ověřuje skutečné
+fyzikální vlastnosti filtru (tlumení jednorázového výkyvu, konvergence na
+konstantním vstupu, směr T), ne jen "proběhlo bez chyby".
+
+**Poctivé omezení, zjištěné při zapojování:** filtr se počítá znovu od
+K=1 při KAŽDÉM volání `analyze()`, nad scénami jen z aktuálního okna
+(~6 scén/2 týdny). To tlumí šum UVNITŘ jednoho okna (testováno, funguje),
+ale NEŘEŠÍ "poslední otevřenou vrstvu" výše — šum MEZI samostatnými
+měsíčními snímky (19,3 % → 61,5 % za 15 dní), protože každé volání
+nenese SWI stav z předchozího. Skutečná oprava tamtoho problému potřebuje
+kontinuální SWI přes měsíce/roky dlouhou řadu, ne per-request reset —
+to je jiný, zatím neudělaný krok, ne totéž co tohle.
+
+**Druhé poctivé omezení:** `T=20` dní je hodnota z literatury (H-SAF),
+NE kalibrovaná na české půdy/plodiny. Intersucho.cz sám rozlišuje stanice
+v hloubce 0-40 cm a 50-100 cm — to je reálná cesta ke kalibraci (fitovat
+T proti hlubinným stanicím), zatím neudělaná.
