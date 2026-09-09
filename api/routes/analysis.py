@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from api.middleware import verify_internal_secret
 from api.models import RadiometricAnalysisRequest
 from engine.datasources.base import MaxAOIExceeded
+from engine.datasources.era5_land import Era5LandSource, Era5InsufficientHistory, geometry_centroid
 from engine.datasources.sentinel1_cdse import Sentinel1CDSESource
 from engine.physics.baseline import HistoricalBaselineCalculator, InsufficientHistory
 from engine.physics.radiometric import RadiometricAnalyzer
@@ -64,8 +65,23 @@ async def analyze_radiometric(req: RadiometricAnalysisRequest):
     except httpx.HTTPStatusError:
         pass  # baseline selhala síťově - radši global_fallback než 502 na celý request
 
+    # Nezávislý druhý zdroj pro kořenovou zónu (viz docs/ADR-003-era5-fusion.md).
+    # Open-Meteo/ERA5-Land nevyžaduje autentizaci — žádná registrace navíc.
+    # Stejný fail-safe vzor jako local_reference: selhání nemá shodit celý
+    # request, jen o ten signál ochudit odpověď (era5_reading zůstane None,
+    # RadiometricAnalyzer to zohlední v measurement_caveat).
+    era5_reading = None
+    try:
+        lat, lon = geometry_centroid(req.geometry)
+        era5_source = Era5LandSource()
+        era5_reading = await era5_source.get_root_zone_reading(lat, lon, as_of_date=req.date_end)
+    except Era5InsufficientHistory:
+        pass
+    except httpx.HTTPStatusError:
+        pass
+
     analyzer = RadiometricAnalyzer()
-    result = analyzer.analyze(scenes, req.geometry, local_reference=local_reference)
+    result = analyzer.analyze(scenes, req.geometry, local_reference=local_reference, era5_reading=era5_reading)
 
     if result.get("success") is False:
         raise HTTPException(status_code=422, detail=result.get("error_message"))

@@ -7,6 +7,7 @@ from engine.physics.radiometric import (
     linear_to_db,
 )
 from engine.physics.baseline import LocalReference
+from engine.datasources.era5_land import Era5RootZoneReading
 from tests.fixtures.mock_scenes import (
     MOCK_GEOMETRY,
     make_dry_scene,
@@ -133,3 +134,37 @@ def test_root_zone_swi_damps_single_spike_more_than_surface_moisture():
 
     assert swi_deviation_from_baseline < surface_swing
     assert result["root_zone_swi_t_days"] == 20.0
+
+
+def test_era5_reading_kept_separate_from_sar_fields():
+    """
+    Regresní test na živý nález 2026-09-09 (ADR-003): SAR-only signál
+    (relative_moisture_pct, root_zone_swi_pct) podhodnotil sucho i po
+    lokální kalibraci ('mild' místo Intersucho 'extrémní'). era5_reading
+    je nezávislý druhý zdroj - musí se objevit jako VLASTNÍ pole, ne
+    přepsat/zprůměrovat SAR výstup.
+    """
+    scenes = [make_scene("2026-09-09", -10.24)]
+    era5 = Era5RootZoneReading(
+        current_vwc=0.185,
+        percentile_rank=0.0,
+        historical_min=0.245,
+        historical_max=0.404,
+        historical_samples=215,
+        depth_layer="soil_moisture_28_to_100cm_mean",
+        below_historical_range=True,
+    )
+
+    result_without_era5 = RadiometricAnalyzer().analyze(scenes, MOCK_GEOMETRY)
+    result_with_era5 = RadiometricAnalyzer().analyze(scenes, MOCK_GEOMETRY, era5_reading=era5)
+
+    assert result_without_era5["era5_root_zone_vwc"] is None
+    assert result_with_era5["era5_root_zone_vwc"] == pytest.approx(0.185)
+    assert result_with_era5["era5_below_historical_range"] is True
+    assert result_with_era5["era5_root_zone_percentile_rank"] == pytest.approx(0.0)
+
+    # ERA5 přítomnost nesmí změnit SAR-odvozená pole - jsou to oddělené zdroje.
+    assert result_with_era5["relative_moisture_pct"] == result_without_era5["relative_moisture_pct"]
+    assert result_with_era5["root_zone_swi_pct"] == result_without_era5["root_zone_swi_pct"]
+
+    assert "NEZÁVISLÝ" in result_with_era5["measurement_caveat"]
