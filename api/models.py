@@ -8,6 +8,12 @@ class RadiometricAnalysisRequest(BaseModel):
     orbit_direction: str = Field(default="BOTH", pattern="^(ASCENDING|DESCENDING|BOTH)$")
 
 
+class TrueColorImageRequest(BaseModel):
+    geometry: dict = Field(..., description="GeoJSON Polygon AOI")
+    date_start: str = Field(..., description="YYYY-MM-DD")
+    date_end: str = Field(..., description="YYYY-MM-DD")
+
+
 class AgroclimateRequest(BaseModel):
     geometry: dict = Field(..., description="GeoJSON Polygon AOI")
     season_start: str = Field(..., description="YYYY-MM-DD, obvykle 1.1. aktuálního roku")
