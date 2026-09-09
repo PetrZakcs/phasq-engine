@@ -1,8 +1,8 @@
 """
 Agroklimatické indexy: growing degree days, mrazová rizika, srážkový
 deficit. Fáze B "dokončovacího" plánu pro zemědělský vertikál
-(viz docs/ADR-004-agroclimate.md) — staví na engine/datasources/era5_weather.py,
-žádný nový externí zdroj dat oproti tomu, co už máme napojené (ADR-003).
+(viz docs/ADR-004-agroclimate.md) — staví na engine/datasources/nasa_power_weather.py
+(ADR-005: NASA POWER, ne Open-Meteo — komerční licence).
 
 STANDARDNÍ, NE VYMYŠLENÉ VZORCE. GDD je učebnicová agrometeorologie
 (McMaster & Wilhelm 1997, "Growing degree-days: one equation, two

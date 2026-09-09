@@ -9,9 +9,9 @@ registrace, bez API klíče — a bez atribuce (NASA public domain policy).
 Živě ověřeno: NASA POWER data mají ~9-10denní zpoždění (MERRA-2 reanalýza
 ještě nedoběhla) — nevhodné pro "co se děje DNES", ale pro sezónní
 agroklimatické součty (GDD, mrazová historie, srážkový deficit za měsíce)
-to nevadí. Proto je NASA POWER tady (engine/physics/agroclimate.py), NE
-v engine/datasources/era5_land.py (živá kořenová zóna, ADR-003) — tam
-latence vadí, tam zůstává otevřená otázka (viz ADR-005).
+to nevadí. Kořenová zóna (živý signál, latence vadí) je proto samostatný
+modul — engine/datasources/nasa_power_rootzone.py (viz ADR-006), stejný
+zdroj dat, jiná otázka (percentil vůči historii, ne jen součet).
 """
 
 from dataclasses import dataclass
@@ -41,7 +41,7 @@ def _to_iso_date(power_date: str) -> str:
     return datetime.strptime(power_date, "%Y%m%d").strftime("%Y-%m-%d")
 
 
-class Era5WeatherSource:
+class NasaPowerWeatherSource:
     """Denní Tmax/Tmin/srážky pro daný bod a časové okno. Žádná autentizace, žádný API klíč."""
 
     async def get_daily_weather(self, lat: float, lon: float, start_date: str, end_date: str) -> DailyWeather:

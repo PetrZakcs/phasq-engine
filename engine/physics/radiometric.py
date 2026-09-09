@@ -19,16 +19,22 @@ dostatečné historie, NE primární zdroj pravdy. Primární je per-AOI lokáln
 baseline z HistoricalBaselineCalculator — bez ní analyzer na reálném poli
 ukázal "no drought" během nezávisle potvrzeného extrémního sucha.
 
-Třetí oprava, 2026-09-09 (viz docs/ADR-003-era5-fusion.md): i s lokální
-baseline a SWI kořenovou zónou analyzer na reálném poli dál podhodnocuje
-sucho proti Intersucho ("mild" místo "extrémní") — protože Sentinel-1
-fyzicky nevidí hlouběji než ~5 cm, žádná kalibrace nad TÍMHLE vstupem to
-nezmění. Řešení není lepší matematika nad stejnými daty, je to DRUHÝ,
-nezávislý zdroj (ERA5-Land reanalýza, engine/datasources/era5_land.py),
-co skutečně modeluje hlubší vrstvu. Zapojen jako samostatné pole
-(`era5_root_zone_*`), NE smíchaný do relative_moisture_pct/root_zone_swi_pct
-— dva různé zdroje s různou fyzikou se nemají tiše průměrovat do jednoho
-čísla, to by jen schovalo jejich nesouhlas.
+Třetí oprava, 2026-09-09 (viz docs/ADR-003-era5-fusion.md, ADR-006):
+i s lokální baseline a SWI kořenovou zónou analyzer na reálném poli
+dál podhodnocuje sucho proti Intersucho ("mild" místo "extrémní") —
+protože Sentinel-1 fyzicky nevidí hlouběji než ~5 cm, žádná kalibrace
+nad TÍMHLE vstupem to nezmění. Řešení není lepší matematika nad
+stejnými daty, je to DRUHÝ, nezávislý zdroj, co skutečně modeluje
+hlubší vrstvu. Zapojen jako samostatné pole (`power_root_zone_*`), NE
+smíchaný do relative_moisture_pct/root_zone_swi_pct — dva různé zdroje
+s různou fyzikou se nemají tiše průměrovat do jednoho čísla.
+
+ADR-006 (2026-09-09): zdroj přepnut z ERA5-Land/Open-Meteo na NASA
+POWER — živě ověřeno, že Open-Meteo zdarma tarif je JEN pro nekomerční
+použití. NASA POWER je zdarma pro cokoliv, natrvalo, žádné budoucí
+"přepneme, až budeme mít peníze". Cena: ~9-10denní zpoždění, proto
+`power_root_zone_effective_date`/`power_root_zone_lag_days` v odpovědi
+— nikdy se to nemaskuje jako aktuální stav.
 """
 
 import math
@@ -36,7 +42,7 @@ import math
 import numpy as np
 
 from engine.datasources.base import SAR_Scene
-from engine.datasources.era5_land import Era5RootZoneReading
+from engine.datasources.nasa_power_rootzone import RootZoneReading
 from engine.physics.baseline import LocalReference
 from engine.physics.root_zone import compute_swi
 
@@ -83,7 +89,7 @@ class RadiometricAnalyzer:
         roi_geometry: dict,
         local_reference: LocalReference | None = None,
         swi_t_days: float = 20.0,
-        era5_reading: Era5RootZoneReading | None = None,
+        power_reading: RootZoneReading | None = None,
     ) -> dict:
         valid_scenes = [s for s in scenes if s.roi_stats.valid_pixel_ratio >= MIN_VALID_PIXEL_RATIO]
         dropped = len(scenes) - len(valid_scenes)
@@ -159,30 +165,34 @@ class RadiometricAnalyzer:
             "reference_seasonal_window_days": local_reference.seasonal_window_days if local_reference else None,
             "citation": "Bauer-Marschallinger et al. (2019), doi:10.3390/rs11050526",
             "spatial_resolution_m": valid_scenes[0].spatial_resolution_m,
-            # Nezávislý druhý zdroj (ERA5-Land, viz engine/datasources/era5_land.py).
-            # Záměrně samostatná pole, ne smíchaná s relative_moisture_pct/
-            # root_zone_swi_pct — jiná fyzika (land-surface model, ne SAR),
-            # jiné rozlišení (~9 km vs. 10 m). Když se dva nezávislé zdroje
-            # neshodnou, to je informace, ne šum k zprůměrování pryč.
-            "era5_root_zone_vwc": era5_reading.current_vwc if era5_reading else None,
-            "era5_root_zone_percentile_rank": era5_reading.percentile_rank if era5_reading else None,
-            "era5_below_historical_range": era5_reading.below_historical_range if era5_reading else None,
-            "era5_depth_layer": era5_reading.depth_layer if era5_reading else None,
-            "era5_historical_samples": era5_reading.historical_samples if era5_reading else None,
+            # Nezávislý druhý zdroj (NASA POWER, viz engine/datasources/
+            # nasa_power_rootzone.py a ADR-006). Záměrně samostatná pole,
+            # ne smíchaná s relative_moisture_pct/root_zone_swi_pct — jiná
+            # fyzika (land-surface model, ne SAR), jiné rozlišení (~50 km
+            # vs. 10 m), a ~9-10denní zpoždění (effective_date/lag_days
+            # říká přesně jak staré, nikdy se to netváří jako aktuální).
+            "power_root_zone_wetness": power_reading.current_wetness if power_reading else None,
+            "power_root_zone_percentile_rank": power_reading.percentile_rank if power_reading else None,
+            "power_root_zone_below_historical_range": power_reading.below_historical_range if power_reading else None,
+            "power_root_zone_effective_date": power_reading.effective_date if power_reading else None,
+            "power_root_zone_lag_days": power_reading.lag_days if power_reading else None,
+            "power_root_zone_historical_samples": power_reading.historical_samples if power_reading else None,
             "measurement_caveat": (
                 "Sentinel-1 C-band VV měří přímo jen vlhkost svrchní vrstvy půdy "
                 "(~0-5 cm). root_zone_swi_pct je časová extrapolace (Wagner et al. "
                 "1999 SWI filtr, T=" + f"{swi_t_days:.0f}" + " dní) nad TÍMTO povrchovým "
                 "signálem — ne nezávislé měření hloubky." + (
-                    " era5_root_zone_percentile_rank je NEZÁVISLÝ druhý zdroj "
-                    "(ERA5-Land land-surface model, vrstva " + (era5_reading.depth_layer if era5_reading else "") +
-                    "), modeluje skutečnou vodní bilanci v hloubce, ne extrapolaci povrchu — "
-                    "když se s relative_moisture_pct rozchází, věř spíš jemu pro hloubkový odhad."
-                    if era5_reading else
-                    " Nezávislý hloubkový zdroj (ERA5-Land) nebyl pro tuhle analýzu dostupný."
+                    " power_root_zone_percentile_rank je NEZÁVISLÝ druhý zdroj "
+                    "(NASA POWER/MERRA-2 land-surface model), modeluje skutečnou "
+                    "vodní bilanci v hloubce, ne extrapolaci povrchu — ALE je to "
+                    f"{power_reading.lag_days if power_reading else '?'} dní staré "
+                    f"(ke dni {power_reading.effective_date if power_reading else '?'}), "
+                    "ne dnešní stav. Zpožděné, ne nedůvěryhodné."
+                    if power_reading else
+                    " Nezávislý hloubkový zdroj (NASA POWER) nebyl pro tuhle analýzu dostupný."
                 ) +
                 " Pro oficiální posouzení sucha konzultuj Intersucho.cz — "
-                "viz docs/ADR-002-local-baseline.md a docs/ADR-003-era5-fusion.md."
+                "viz docs/ADR-002-local-baseline.md a docs/ADR-006-nasa-power-rootzone.md."
             ),
         }
 

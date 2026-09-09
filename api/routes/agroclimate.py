@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from api.middleware import verify_internal_secret
 from api.models import AgroclimateRequest
-from engine.datasources.era5_land import geometry_centroid
-from engine.datasources.era5_weather import Era5WeatherSource
+from engine.datasources.nasa_power_rootzone import geometry_centroid
+from engine.datasources.nasa_power_weather import NasaPowerWeatherSource
 from engine.physics.agroclimate import (
     compute_gdd,
     find_last_spring_frost,
@@ -26,7 +26,7 @@ router = APIRouter()
 @router.post("/agroclimate/summary", dependencies=[Depends(verify_internal_secret)])
 async def agroclimate_summary(req: AgroclimateRequest):
     lat, lon = geometry_centroid(req.geometry)
-    source = Era5WeatherSource()
+    source = NasaPowerWeatherSource()
     as_of_year = int(req.as_of_date[:4])
 
     try:
@@ -38,7 +38,7 @@ async def agroclimate_summary(req: AgroclimateRequest):
         raise HTTPException(status_code=422, detail="Žádná data pro zadané období.")
 
     # NASA POWER má ~9-10denní zpoždění (MERRA-2 reanalýza) — poslední dny
-    # requestovaného období se zahazují jako chybějící (era5_weather.py).
+    # requestovaného období se zahazují jako chybějící (nasa_power_weather.py).
     # data_through_date říká, kam GDD/mráz/srážky SKUTEČNĚ sahají — jinak
     # by uživatel mohl zaměnit "GDD do dneška" za "GDD do před 10 dny".
     data_through_date = current.dates[-1]
