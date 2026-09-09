@@ -1,0 +1,73 @@
+"""
+Fáze B "dokončovacího" plánu pro zemědělský vertikál (viz docs/ADR-004-agroclimate.md).
+Agroklimatické indexy z ERA5-Land/Open-Meteo — žádná CDSE závislost,
+žádná autentizace navíc.
+"""
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+
+from api.middleware import verify_internal_secret
+from api.models import AgroclimateRequest
+from engine.datasources.era5_land import geometry_centroid
+from engine.datasources.era5_weather import Era5WeatherSource
+from engine.physics.agroclimate import (
+    compute_gdd,
+    find_last_spring_frost,
+    find_first_autumn_frost,
+    compute_precipitation_deficit_mm,
+    historical_daily_precip_mean,
+)
+
+router = APIRouter()
+
+
+@router.post("/agroclimate/summary", dependencies=[Depends(verify_internal_secret)])
+async def agroclimate_summary(req: AgroclimateRequest):
+    lat, lon = geometry_centroid(req.geometry)
+    source = Era5WeatherSource()
+    as_of_year = int(req.as_of_date[:4])
+
+    try:
+        current = await source.get_daily_weather(lat, lon, req.season_start, req.as_of_date)
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Open-Meteo error {e.response.status_code}")
+
+    if not current.dates:
+        raise HTTPException(status_code=422, detail="Žádná data pro zadané období.")
+
+    gdd = compute_gdd(current.tmax, current.tmin, base_temp=req.gdd_base_temp)
+    last_spring_frost = find_last_spring_frost(current.dates, current.tmin)
+    first_autumn_frost = find_first_autumn_frost(current.dates, current.tmin)
+
+    hist_start = f"{as_of_year - req.lookback_years}-01-01"
+    hist_end = f"{as_of_year - 1}-12-31"
+    try:
+        historical = await source.get_daily_weather(lat, lon, hist_start, hist_end)
+        hist_mean = historical_daily_precip_mean(historical.dates, historical.precipitation_mm, years_exclude={as_of_year})
+        precip_deficit_mm = compute_precipitation_deficit_mm(current.precipitation_mm, hist_mean)
+    except (httpx.HTTPStatusError, ValueError):
+        hist_mean = None
+        precip_deficit_mm = None
+
+    return {
+        "success": True,
+        "season_start": req.season_start,
+        "as_of_date": req.as_of_date,
+        "days_in_period": len(current.dates),
+        "growing_degree_days": gdd,
+        "gdd_base_temp": req.gdd_base_temp,
+        "last_spring_frost": last_spring_frost,
+        "first_autumn_frost": first_autumn_frost,
+        "precipitation_deficit_mm": precip_deficit_mm,
+        "historical_daily_precip_mean_mm": round(hist_mean, 2) if hist_mean is not None else None,
+        "historical_lookback_years": req.lookback_years,
+        "data_source": "era5_land_openmeteo",
+        "methodology": "gdd_mcmaster_wilhelm_1997",
+        "caveat": (
+            "gdd_base_temp je defaultní hodnota pro obiloviny střední Evropy, NE "
+            "univerzální fyzikální konstanta — pro kukuřici/slunečnici použij vyšší "
+            "základní teplotu (~10°C). Mrazová data jsou z ~9km rozlišení reanalýzy, "
+            "ne z meteostanice na poli."
+        ),
+    }
