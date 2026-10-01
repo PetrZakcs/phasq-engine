@@ -12,6 +12,7 @@ from api.models import RadiometricAnalysisRequest
 from engine.datasources.base import MaxAOIExceeded
 from engine.datasources.nasa_power_rootzone import NasaPowerRootZoneSource, RootZoneInsufficientHistory, geometry_centroid
 from engine.datasources.sentinel1_cdse import Sentinel1CDSESource
+from engine.datasources.sentinel2_cdse import Sentinel2NDVISource
 from engine.physics.baseline import HistoricalBaselineCalculator, InsufficientHistory
 from engine.physics.radiometric import RadiometricAnalyzer
 from utils.config import settings
@@ -56,9 +57,21 @@ async def analyze_radiometric(req: RadiometricAnalysisRequest):
     # Intersucho.cz). POZOR: počítá se on-demand, ~4-10s navíc na request —
     # cachování per-AOI je Fáze 3 TODO (utils/config.py, Supabase), zatím
     # zaplacena latence za správnost, ne za rychlost.
+    #
+    # NDVI hradlo (Sentinel2NDVISource) — OPRAVA 2026-10-01: tohle bylo
+    # postavené, otestované a v ADR-002 označené "hotovo, funguje", ale
+    # NIKDY se skutečně nepředávalo do HistoricalBaselineCalculator tady
+    # v živé API cestě — nalezeno externí review, ne vlastním testem.
+    # Zapojeno teď natrvalo, ne jen v izolovaných testech.
+    ndvi_source = Sentinel2NDVISource(
+        client_id=settings.CDSE_CLIENT_ID,
+        client_secret=settings.CDSE_CLIENT_SECRET,
+        token_url=settings.CDSE_TOKEN_URL,
+        stats_api_url=settings.CDSE_STATS_API_URL,
+    )
     local_reference = None
     try:
-        baseline_calc = HistoricalBaselineCalculator(source)
+        baseline_calc = HistoricalBaselineCalculator(source, ndvi_source=ndvi_source)
         local_reference = await baseline_calc.compute(req.geometry, as_of_date=req.date_end)
     except InsufficientHistory:
         pass  # RadiometricAnalyzer spadne na global_fallback a označí to v response

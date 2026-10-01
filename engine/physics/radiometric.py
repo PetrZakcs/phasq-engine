@@ -37,14 +37,13 @@ použití. NASA POWER je zdarma pro cokoliv, natrvalo, žádné budoucí
 — nikdy se to nemaskuje jako aktuální stav.
 """
 
-import math
-
 import numpy as np
 
 from engine.datasources.base import SAR_Scene
 from engine.datasources.nasa_power_rootzone import RootZoneReading
 from engine.physics.baseline import LocalReference
 from engine.physics.root_zone import compute_swi
+from utils.decibel import db_to_linear, linear_to_db  # noqa: F401 - re-exportováno, testy importují odsud
 
 SIGMA_DRY_REF_DB = -22.0
 SIGMA_WET_REF_DB = -8.0
@@ -61,16 +60,6 @@ SEVERITY_THRESHOLDS_PCT = [
     (35.0, "moderate"),
     (20.0, "severe"),
 ]  # pod 20 % = "extreme"
-
-
-def db_to_linear(db: float) -> float:
-    return 10 ** (db / 10.0)
-
-
-def linear_to_db(linear: float) -> float:
-    if linear <= 0:
-        return -50.0
-    return 10 * math.log10(linear)
 
 
 def mean_backscatter_db(db_values: list[float]) -> float:

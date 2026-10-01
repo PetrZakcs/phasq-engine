@@ -16,6 +16,7 @@ import httpx
 
 from engine.datasources.base import DataSource, SAR_Scene, ROIStats, MaxAOIExceeded
 from utils.cdse_auth import CDSETokenProvider
+from utils.decibel import linear_to_db, approx_stddev_db
 from utils.geometry import polygon_area_ha
 from utils.reproject import reproject_geometry_to_utm
 
@@ -111,7 +112,7 @@ class Sentinel1CDSESource(DataSource):
                     "to": f"{date_end}T23:59:59Z",
                 },
                 "aggregationInterval": {"of": "P1D"},
-                "evalscript": _backscatter_db_evalscript(band),
+                "evalscript": _backscatter_linear_evalscript(band),
                 "resx": self.typical_resolution_m,
                 "resy": self.typical_resolution_m,
             },
@@ -127,9 +128,24 @@ class Sentinel1CDSESource(DataSource):
         }
 
     def _parse_stats_response(self, raw: dict, geometry: dict, polarization: str) -> list[SAR_Scene]:
-        # TODO(ověřit proti live API): skutečný tvar odpovědi. Předpoklad níže:
-        # raw["data"] je list intervalů, každý má "interval"."from" a
-        # "outputs"."default"."bands"."B0"."stats" s mean/stDev/percentiles.
+        # Oprava 2026-10-01 (nález z externí review, živě ověřeno):
+        # evalscript teď vrací LINEÁRNÍ hodnoty, ne dB — server agreguje
+        # (mean/percentily) LINEÁRNĚ, dB převod je AŽ TADY, po agregaci.
+        # Opačný postup (dB per-pixel, server zprůměruje dB) dával živě
+        # ověřeno o 0,624 dB jinou hodnotu — stejná chyba jako #3
+        # z master_plan.md (průměr v dB škále), jen prostorově přes
+        # pixely místo časově přes scény.
+        #
+        # valid_pixel_ratio: geometryPixelCount je TOP-LEVEL pole v
+        # odpovědi (ne per-interval) — živě ověřeno, že je konstantní
+        # napříč scénami pro danou AOI (čistě geometrický údaj: kolik
+        # pixelů polygon skutečně pokrývá). sampleCount je podle
+        # dokumentace Sentinel Hub počet pixelů v BOUNDING BOXU geometrie,
+        # ne v polygonu — dělit jím měří hlavně tvar pole vůči jeho
+        # obdélníkovému obalu, ne kvalitu dat. Správný poměr:
+        # (sampleCount - noDataCount) / geometryPixelCount.
+        geometry_pixel_count = raw.get("geometryPixelCount")
+
         scenes: list[SAR_Scene] = []
         for interval in raw.get("data", []):
             stats = interval.get("outputs", {}).get("default", {}).get("bands", {}).get("B0", {}).get("stats")
@@ -139,6 +155,21 @@ class Sentinel1CDSESource(DataSource):
             date_str = interval["interval"]["from"][:10]
             percentiles = stats.get("percentiles", {})
 
+            mean_linear = stats["mean"]
+            mean_db = linear_to_db(mean_linear)
+            p10_db = linear_to_db(percentiles.get("10.0", mean_linear))
+            p90_db = linear_to_db(percentiles.get("90.0", mean_linear))
+
+            sample_count = stats.get("sampleCount", 0)
+            no_data_count = stats.get("noDataCount", 0)
+            valid_in_polygon = max(sample_count - no_data_count, 0)
+            if geometry_pixel_count:
+                valid_ratio = valid_in_polygon / geometry_pixel_count
+            else:
+                # geometryPixelCount chybí (nečekané) - fallback na starou
+                # aproximaci, radši konzervativní odhad než pád na chybě.
+                valid_ratio = valid_in_polygon / max(sample_count, 1)
+
             scenes.append(
                 SAR_Scene(
                     acquisition_date=date_str,
@@ -146,11 +177,11 @@ class Sentinel1CDSESource(DataSource):
                     orbit_direction="UNKNOWN",  # TODO: extrahovat z metadat, pokud API vrací
                     instrument_mode="IW",
                     roi_stats=ROIStats(
-                        mean_db=stats["mean"],
-                        p10_db=percentiles.get("10.0", stats["mean"]),
-                        p90_db=percentiles.get("90.0", stats["mean"]),
-                        stddev_db=stats.get("stDev", 0.0),
-                        valid_pixel_ratio=stats.get("sampleCount", 0) / max(stats.get("noDataCount", 0) + stats.get("sampleCount", 1), 1),
+                        mean_db=mean_db,
+                        p10_db=p10_db,
+                        p90_db=p90_db,
+                        stddev_db=approx_stddev_db(stats.get("stDev", 0.0), mean_linear),
+                        valid_pixel_ratio=valid_ratio,
                     ),
                     spatial_resolution_m=self.typical_resolution_m,
                     crs="EPSG:4326",
@@ -169,13 +200,21 @@ def _geometry_bbox(geometry: dict) -> tuple:
     return (min(lons), min(lats), max(lons), max(lats))
 
 
-# evalscript v3 — backscatter v dB pro zadanou polarizaci (VV/VH). NENÍ zde
-# per-pixel speckle filtr (viz ADR-001 oprava): evaluatePixel v evalscriptu
-# nemá garantovaný přístup k sousedním pixelům, takže Refined Lee kernel zde
-# není implementován jako fakt, ne jen odloženo. Šum pro fázi 1 zmírňujeme
-# přes percentily (p10/p90 v ROIStats) a agregaci přes více scén v
-# RadiometricAnalyzer, ne přes filtr na vstupu.
-def _backscatter_db_evalscript(band: str) -> str:
+# evalscript v3 — backscatter v LINEÁRNÍ škále (NE dB) pro zadanou
+# polarizaci (VV/VH). Oprava 2026-10-01: dřív se dB počítalo tady, per
+# pixel, a Statistical API pak server-side ZPRŮMĚROVALO ty dB hodnoty —
+# matematicky stejná chyba jako #3 z master_plan.md (průměr v dB škále),
+# jen prostorově přes pixely místo časově přes scény. Živě ověřeno:
+# rozdíl 0,624 dB proti správnému postupu (zprůměrovat lineárně, pak
+# převést na dB — viz _parse_stats_response). Evalscript proto vrací
+# syrovou lineární hodnotu, dB převod je až po agregaci v Pythonu.
+#
+# NENÍ zde per-pixel speckle filtr (viz ADR-001 oprava): evaluatePixel
+# v evalscriptu nemá garantovaný přístup k sousedním pixelům, takže
+# Refined Lee kernel zde není implementován jako fakt, ne jen odloženo.
+# Šum pro fázi 1 zmírňujeme přes percentily (p10/p90 v ROIStats) a
+# agregaci přes více scén v RadiometricAnalyzer, ne přes filtr na vstupu.
+def _backscatter_linear_evalscript(band: str) -> str:
     return f"""
 //VERSION=3
 function setup() {{
@@ -188,7 +227,6 @@ function setup() {{
   }};
 }}
 function evaluatePixel(samples) {{
-  let val_db = samples.{band} > 0 ? 10 * Math.log10(samples.{band}) : -50;
-  return {{ default: [val_db], dataMask: [samples.dataMask] }};
+  return {{ default: [samples.{band}], dataMask: [samples.dataMask] }};
 }}
 """
