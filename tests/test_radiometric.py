@@ -17,9 +17,17 @@ from tests.fixtures.mock_scenes import (
 )
 
 
+GLOBAL_REF_AS_LOCAL = LocalReference(
+    dry_db=-22.0, wet_db=-8.0, scenes_used=100,
+    years_used=[2021, 2022, 2023, 2024, 2025], seasonal_window_days=21,
+)
+
+
 def test_drought_detection_extreme():
+    # ADR-008: verdikt (severity/risk) existuje jen s local_reference - viz
+    # test_global_fallback_never_emits_verdict níže pro opačný případ.
     analyzer = RadiometricAnalyzer()
-    result = analyzer.analyze([make_dry_scene()], MOCK_GEOMETRY)
+    result = analyzer.analyze([make_dry_scene()], MOCK_GEOMETRY, local_reference=GLOBAL_REF_AS_LOCAL)
     assert result["success"] is True
     assert result["drought_risk"] is True
     assert result["drought_severity"] == "extreme"
@@ -28,9 +36,27 @@ def test_drought_detection_extreme():
 
 def test_no_drought_wet_conditions():
     analyzer = RadiometricAnalyzer()
-    result = analyzer.analyze([make_wet_scene()], MOCK_GEOMETRY)
+    result = analyzer.analyze([make_wet_scene()], MOCK_GEOMETRY, local_reference=GLOBAL_REF_AS_LOCAL)
     assert result["drought_risk"] is False
     assert result["relative_moisture_pct"] > 60
+
+
+def test_global_fallback_never_emits_verdict():
+    """
+    ADR-008: global_fallback nesmí vydávat verdikt (drought_severity/
+    drought_risk), i když je relative_moisture_pct spočítatelné. Nalezeno
+    externí review + živě potvrzeno v ADR-007 - vlajkové pole s global_fallback
+    dostalo "89 %, none", stejná třída chyby jako ADR-002 ("84 %, no drought"
+    během reálného extrémního sucha). Syrové relative_moisture_pct zůstává
+    (orientační), verdikt ne.
+    """
+    analyzer = RadiometricAnalyzer()
+    result = analyzer.analyze([make_dry_scene()], MOCK_GEOMETRY)  # bez local_reference
+    assert result["reference_source"] == "global_fallback"
+    assert result["drought_severity"] == "unknown"
+    assert result["drought_risk"] is None
+    assert result["relative_moisture_pct"] is not None  # syrová data pořád dostupná
+    assert "Nelze spolehlivě vyhodnotit" in result["alert_message"]
 
 
 def test_negative_trend_soil_drying():
@@ -86,7 +112,11 @@ def test_local_reference_changes_verdict_vs_global_fallback():
 
     result_global = analyzer.analyze(scenes, MOCK_GEOMETRY, local_reference=None)
     assert result_global["reference_source"] == "global_fallback"
-    assert result_global["drought_risk"] is False
+    # ADR-008: dřív tady bylo assert drought_risk is False - přesně ten
+    # přehnaně sebevědomý verdikt, co ADR-002 i ADR-007 živě usvědčily
+    # z faktické chyby. Teď global_fallback nedává verdikt vůbec.
+    assert result_global["drought_severity"] == "unknown"
+    assert result_global["drought_risk"] is None
 
     local_ref = LocalReference(dry_db=-13.72, wet_db=-8.66, scenes_used=188, years_used=[2021, 2022, 2023, 2024, 2025], seasonal_window_days=21)
     result_local = analyzer.analyze(scenes, MOCK_GEOMETRY, local_reference=local_ref)

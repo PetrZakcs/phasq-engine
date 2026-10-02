@@ -117,7 +117,20 @@ class RadiometricAnalyzer:
             reference_source = "global_fallback"
 
         relative_moisture = self._sigma_to_moisture_pct(mean_vv, dry_db, wet_db)
-        drought_risk, severity = self._assess_drought(relative_moisture)
+
+        # ADR-008: global_fallback nesmí vydávat verdikt. Nalezeno externí
+        # review + živě potvrzeno v ADR-007 (vlajkové pole spadlo na
+        # global_fallback a dostalo "89 %, none" - DÁL od Intersucho reality
+        # než předchozí vadný běh). Stejné globální konstanty už jednou v
+        # ADR-002 daly "84 %, no drought" během nezávisle potvrzeného
+        # extrémního sucha - text schovaný v alert_message to nestačí
+        # ochránit, drought_severity/drought_risk se dřív četly samostatně.
+        # relative_moisture_pct zůstává (syrové orientační číslo), ale
+        # verdikt (severity/risk) je jen tam, kde je reference lokální.
+        if reference_source == "local_baseline":
+            drought_risk, severity = self._assess_drought(relative_moisture)
+        else:
+            drought_risk, severity = None, "unknown"
 
         # Kořenová zóna (viz engine/physics/root_zone.py): SWI exponenciální
         # filtr nad per-scéna povrchovou vlhkostí, T z literatury (default
@@ -210,11 +223,17 @@ class RadiometricAnalyzer:
         return True, "extreme"
 
     def _alert_message(self, severity: str, trend_db: float, reference_source: str) -> str:
-        confidence_note = "" if reference_source == "local_baseline" else " (POZOR: globální fallback referenc, nízká důvěryhodnost — chybí lokální historie)"
+        if severity == "unknown":
+            return (
+                "Nelze spolehlivě vyhodnotit riziko sucha — chybí dostatečná lokální "
+                "historická reference pro tohle pole (reference_source=global_fallback). "
+                "relative_moisture_pct níže je jen orientační odhad z globálních konstant, "
+                "NENÍ to verdikt. Viz docs/ADR-002, docs/ADR-007, docs/ADR-008."
+            )
         if severity == "none":
-            return f"Vlhkostní poměry v normě.{confidence_note}"
+            return "Vlhkostní poměry v normě."
         direction = "vysychá" if trend_db < 0 else "vlhne"
-        return f"Riziko sucha ({severity}): půda dle trendu {direction} ({trend_db:+.1f} dB).{confidence_note}"
+        return f"Riziko sucha ({severity}): půda dle trendu {direction} ({trend_db:+.1f} dB)."
 
     def _error_response(self, code: str, message: str) -> dict:
         return {"success": False, "error_code": code, "error_message": message}

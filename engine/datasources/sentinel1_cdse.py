@@ -68,7 +68,7 @@ class Sentinel1CDSESource(DataSource):
             resp.raise_for_status()
             raw = resp.json()
 
-        return self._parse_stats_response(raw, geometry, band)
+        return self._parse_stats_response(raw, geometry, band, orbit_direction)
 
     async def get_scene_count(self, geometry: dict, date_start: str, date_end: str) -> int:
         scenes = await self.get_scenes(geometry, date_start, date_end)
@@ -127,7 +127,9 @@ class Sentinel1CDSESource(DataSource):
             },
         }
 
-    def _parse_stats_response(self, raw: dict, geometry: dict, polarization: str) -> list[SAR_Scene]:
+    def _parse_stats_response(
+        self, raw: dict, geometry: dict, polarization: str, orbit_direction: str = "BOTH"
+    ) -> list[SAR_Scene]:
         # Oprava 2026-10-01 (nález z externí review, živě ověřeno):
         # evalscript teď vrací LINEÁRNÍ hodnoty, ne dB — server agreguje
         # (mean/percentily) LINEÁRNĚ, dB převod je AŽ TADY, po agregaci.
@@ -170,11 +172,18 @@ class Sentinel1CDSESource(DataSource):
                 # aproximaci, radši konzervativní odhad než pád na chybě.
                 valid_ratio = valid_in_polygon / max(sample_count, 1)
 
+            # Statistical API nevrací per-scéna orbitDirection v odpovědi
+            # (ověřeno čtením dokumentace, ne nalezeno žádné takové pole).
+            # Když request explicitně filtroval na ASCENDING/DESCENDING,
+            # KAŽDÁ vrácená scéna tomu filtru nutně vyhovuje - víme to jistě,
+            # ne hádáme. Jen při "BOTH" nejde rozlišit bez dalšího volání,
+            # proto zůstává "UNKNOWN" (čestně, ne smyšlená hodnota).
+            scene_orbit = orbit_direction if orbit_direction != "BOTH" else "UNKNOWN"
             scenes.append(
                 SAR_Scene(
                     acquisition_date=date_str,
                     polarization=polarization,
-                    orbit_direction="UNKNOWN",  # TODO: extrahovat z metadat, pokud API vrací
+                    orbit_direction=scene_orbit,
                     instrument_mode="IW",
                     roi_stats=ROIStats(
                         mean_db=mean_db,
