@@ -1,0 +1,14 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": { "type": "Point", "coordinates": [15.0795967, 49.7233882] },
+      "properties": {
+        "id": "zelivka-uv",
+        "name": "Úpravna vody Želivka",
+        "source_note": "Poloha: OpenStreetMap way 249680930 (landuse=industrial, name='Úpravna vody Želivka'), Rýzmburk, Hulice, okres Benešov. Provozovatel: Želivská provozní, s.r.o. Veřejně známý objekt (zadání pravidlo 4) - největší úpravna vody v ČR, zásobuje mj. Prahu."
+      }
+    }
+  ]
+}
