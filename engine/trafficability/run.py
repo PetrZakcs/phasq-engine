@@ -89,7 +89,7 @@ async def process_polygon(poly: TrafficabilityPolygon, as_of_date: str) -> Traff
     clay = await get_clay_reading(lon, lat)
     layers.append(clay)
 
-    era5 = await get_volumetric_moisture_reading(lon, lat)
+    era5 = await get_volumetric_moisture_reading(lon, lat, as_of_date=as_of_date)
     layers.append(era5)
 
     # Sentinel-1 + lokální baseline (ADR-011 threshold=0.5) - znovupoužito, neopsáno.

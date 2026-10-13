@@ -96,6 +96,24 @@ ERA5-Land nebude k dispozici aktuální ani v nejlepším případě - buď
 `engine/ki/datasources/egms.py`), nebo (pokud se token získá) vždy
 s jasně označenou minimální stářím ~5 dní, nikdy jako "dnešní stav".
 
+**Update 2026-10-13 (po Fázi 2):** Petr zaregistroval CDS účet a dodal
+`CDS_API_KEY`. Potvrzeno živě: registrace je zdarma, žádný placený
+tarif. `engine/trafficability/datasources/era5_cds.py` implementováno
+plně (ne jen stub) - ale živý test s platným klíčem narazil na DALŠÍ
+krok: `403 required licences not accepted`. CDS vyžaduje odsouhlasení
+licence KONKRÉTNÍHO datasetu na webu (https://cds.climate.copernicus.eu/
+datasets/reanalysis-era5-land?tab=download#manage-licences), samotný
+API klíč nestačí - tohle se NEDÁ udělat přes API. Petr se rozhodl
+pokračovat bez odsouhlasení teď; modul vrací honest "Nelze určit" s
+instrukcí, co a kde odsouhlasit, dokud se tak nestane. Implementace je
+hotová a čeká na live re-test, ne zablokovaná.
+
+Vedlejší zjištění: oficiální CDS REST API je dle jejich vlastní
+dokumentace "not supported" pro přímé HTTP volání - použita `cdsapi`
+(oficiálně doporučená knihovna), jediná výjimka z projektového vzoru
+"httpx všude" v tomhle repu, zdůvodněná přímo jejich dokumentací, ne
+pohodlností.
+
 ### Vedlejší nález: NASA POWER srážky mají 4denní latenci (živě ověřeno teď)
 
 `nasa_power_weather.py` dosud latenci srážek (`PRECTOTCORR`) nikde
