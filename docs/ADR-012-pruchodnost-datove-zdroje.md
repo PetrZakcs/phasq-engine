@@ -99,14 +99,19 @@ s jasně označenou minimální stářím ~5 dní, nikdy jako "dnešní stav".
 **Update 2026-10-13 (po Fázi 2):** Petr zaregistroval CDS účet a dodal
 `CDS_API_KEY`. Potvrzeno živě: registrace je zdarma, žádný placený
 tarif. `engine/trafficability/datasources/era5_cds.py` implementováno
-plně (ne jen stub) - ale živý test s platným klíčem narazil na DALŠÍ
-krok: `403 required licences not accepted`. CDS vyžaduje odsouhlasení
-licence KONKRÉTNÍHO datasetu na webu (https://cds.climate.copernicus.eu/
-datasets/reanalysis-era5-land?tab=download#manage-licences), samotný
-API klíč nestačí - tohle se NEDÁ udělat přes API. Petr se rozhodl
-pokračovat bez odsouhlasení teď; modul vrací honest "Nelze určit" s
-instrukcí, co a kde odsouhlasit, dokud se tak nestane. Implementace je
-hotová a čeká na live re-test, ne zablokovaná.
+plně (ne jen stub). První živý test s platným klíčem narazil na
+`403 required licences not accepted` (CDS vyžaduje odsouhlasení licence
+KONKRÉTNÍHO datasetu na webu, samotný API klíč nestačí) - zdokumentováno,
+modul mezitím vracel honest "Nelze určit" s instrukcí.
+
+**Druhý živý test (stejný den, o pár minut později, žádná změna kódu
+ani kreditu):** fungoval. Vrátil skutečnou hodnotu (0,152 m³/m³,
+datum 2026-08-14, ~60 dní staré). Nejpravděpodobnější vysvětlení:
+prodleva v šíření odsouhlasení licence na straně CDS (účet mohl mít
+licenci už přednastavenou/výchozí, nebo se propagace stavu zpozdila) -
+nejde to ověřit zpětně, nehádám to jako jistotu, jen jako
+nejpravděpodobnější vysvětlení pozorovaného chování. Důležité je, že
+ERA5-Land je teď živě potvrzeně funkční, ne jen teoreticky implementovaný.
 
 Vedlejší zjištění: oficiální CDS REST API je dle jejich vlastní
 dokumentace "not supported" pro přímé HTTP volání - použita `cdsapi`
