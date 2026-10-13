@@ -42,7 +42,11 @@ from datetime import datetime, timedelta
 import numpy as np
 
 from engine.datasources.base import DataSource
-from engine.datasources.sentinel2_cdse import Sentinel2NDVISource, nearest_ndvi
+from engine.datasources.sentinel2_cdse import (
+    DENSE_VEGETATION_NDVI_THRESHOLD,
+    Sentinel2NDVISource,
+    nearest_ndvi,
+)
 
 MIN_SCENES_PER_YEAR = 8  # pod touto hranicí je percentil JEDNOHO roku nedůvěryhodný, ten rok se do mediánu nepočítá
 MIN_YEARS_FOR_MEDIAN = 3  # medián z míň než 3 hodnot není o moc lepší než jedna hodnota
@@ -58,6 +62,7 @@ class LocalReference:
     seasonal_window_days: int = 0
     ndvi_gated: bool = False
     dense_vegetation_scenes_excluded: int = 0
+    dense_vegetation_ndvi_threshold_used: float | None = None
 
 
 class InsufficientHistory(Exception):
@@ -80,6 +85,7 @@ class HistoricalBaselineCalculator:
         seasonal_window_days: int = 21,
         dry_percentile: float = 5.0,
         wet_percentile: float = 95.0,
+        dense_vegetation_ndvi_threshold: float = DENSE_VEGETATION_NDVI_THRESHOLD,
     ):
         self.source = source
         self.ndvi_source = ndvi_source
@@ -87,6 +93,10 @@ class HistoricalBaselineCalculator:
         self.seasonal_window_days = seasonal_window_days
         self.dry_percentile = dry_percentile
         self.wet_percentile = wet_percentile
+        # Parametrizováno 2026-10-13 (ADR-011) - výchozí hodnota =
+        # DENSE_VEGETATION_NDVI_THRESHOLD, chování beze změny, dokud ho
+        # volající explicitně nepřepíše.
+        self.dense_vegetation_ndvi_threshold = dense_vegetation_ndvi_threshold
 
     async def compute(self, geometry: dict, as_of_date: str) -> LocalReference:
         """
@@ -135,7 +145,7 @@ class HistoricalBaselineCalculator:
                 kept = []
                 for s in valid:
                     nd = nearest_ndvi(ndvi_series, s.acquisition_date, max_days_gap=NDVI_MATCH_MAX_DAYS_GAP)
-                    if nd is not None and nd.is_dense_vegetation:
+                    if nd is not None and nd.is_dense_vegetation(self.dense_vegetation_ndvi_threshold):
                         dense_excluded += 1
                         continue
                     kept.append(s)
@@ -171,4 +181,7 @@ class HistoricalBaselineCalculator:
             seasonal_window_days=self.seasonal_window_days,
             ndvi_gated=self.ndvi_source is not None,
             dense_vegetation_scenes_excluded=dense_excluded,
+            dense_vegetation_ndvi_threshold_used=(
+                self.dense_vegetation_ndvi_threshold if self.ndvi_source is not None else None
+            ),
         )

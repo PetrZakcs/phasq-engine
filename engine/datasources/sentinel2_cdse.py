@@ -40,9 +40,14 @@ class NDVISample:
     mean_ndvi: float
     valid_pixel_ratio: float
 
-    @property
-    def is_dense_vegetation(self) -> bool:
-        return self.mean_ndvi > DENSE_VEGETATION_NDVI_THRESHOLD
+    def is_dense_vegetation(self, threshold: float = DENSE_VEGETATION_NDVI_THRESHOLD) -> bool:
+        """
+        Parametrizováno 2026-10-13 (ADR-011, engine/trafficability zadání
+        fáze 0): práh 0,35 byl natvrdo a nekalibrovaný (ADR-002 to už
+        tehdy přiznávalo jako "ne vyladěno na naše pole"). Výchozí hodnota
+        beze změny - volající kód bez argumentu se chová přesně jako dřív.
+        """
+        return self.mean_ndvi > threshold
 
 
 class Sentinel2NDVISource:

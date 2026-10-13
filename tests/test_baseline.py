@@ -3,8 +3,10 @@ import asyncio
 import numpy as np
 import pytest
 
+from engine.datasources.sentinel2_cdse import DENSE_VEGETATION_NDVI_THRESHOLD, NDVISample
 from engine.physics.baseline import HistoricalBaselineCalculator, InsufficientHistory
 from tests.fixtures.fake_datasource import FakeDataSource
+from tests.fixtures.fake_ndvi_source import FakeNdviSource
 from tests.fixtures.mock_scenes import MOCK_GEOMETRY, make_scene
 
 AS_OF = "2026-08-30"
@@ -116,3 +118,82 @@ def test_seasonal_window_excludes_out_of_season_scenes():
 
     # kdyby se -3 dB (jiná sezóna) dostalo dovnitř, wet_db by bylo blízko -3, ne -12
     assert ref.wet_db < -5.0
+
+
+def _scenes_and_ndvi_with_split_vegetation(years: list[int], per_year: int, bare_db: float, dense_db: float, dense_ndvi: float):
+    """
+    Polovina scén za rok má NDVI nad `dense_ndvi` (simuluje hustou vegetaci,
+    mean_db=dense_db), polovina pod (bare_db). Vrací (scenes, ndvi_samples)
+    se stejnými daty, aby je nearest_ndvi spároval 1:1.
+    """
+    scenes = _seasonal_scenes(
+        years, per_year,
+        lambda y, i: dense_db if i % 2 == 0 else bare_db,
+    )
+    ndvi_samples = [
+        NDVISample(date=s.acquisition_date, mean_ndvi=(dense_ndvi + 0.1) if s.roi_stats.mean_db == dense_db else 0.20, valid_pixel_ratio=1.0)
+        for s in scenes
+    ]
+    return scenes, ndvi_samples
+
+
+def test_default_ndvi_threshold_unchanged_behavior():
+    """
+    Regresní pojistka na parametrizaci (ADR-011, 2026-10-13): volání BEZ
+    dense_vegetation_ndvi_threshold se musí chovat přesně jako dřív -
+    práh DENSE_VEGETATION_NDVI_THRESHOLD (0.35) vyřadí scény s NDVI nad
+    ním.
+    """
+    scenes, ndvi_samples = _scenes_and_ndvi_with_split_vegetation(
+        [2021, 2022, 2023, 2024, 2025], per_year=16,
+        bare_db=-12.0, dense_db=-4.0, dense_ndvi=DENSE_VEGETATION_NDVI_THRESHOLD,
+    )
+    source = FakeDataSource(scenes)
+    ndvi_source = FakeNdviSource(ndvi_samples)
+    calc = HistoricalBaselineCalculator(source, ndvi_source=ndvi_source, lookback_years=5, seasonal_window_days=21)
+
+    ref = asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
+
+    # -4.0 dB scény (NDVI nad prahem) vyřazeny -> wet_db blízko -12.0, ne -4.0
+    assert ref.wet_db < -8.0
+    assert ref.dense_vegetation_scenes_excluded == 5 * 8  # polovina z 16/rok, 5 let
+    assert ref.dense_vegetation_ndvi_threshold_used == DENSE_VEGETATION_NDVI_THRESHOLD
+
+
+def test_higher_ndvi_threshold_keeps_dense_scenes_and_changes_reference():
+    """
+    Hlavní test parametrizace: vyšší práh (0.6) NEVYŘADÍ scény s NDVI
+    0.45 (nad starým prahem 0.35, pod novým 0.6) - referenci to změří
+    jinak, viditelně.
+    """
+    scenes, ndvi_samples = _scenes_and_ndvi_with_split_vegetation(
+        [2021, 2022, 2023, 2024, 2025], per_year=16,
+        bare_db=-12.0, dense_db=-4.0, dense_ndvi=DENSE_VEGETATION_NDVI_THRESHOLD,
+    )
+    source = FakeDataSource(scenes)
+    ndvi_source = FakeNdviSource(ndvi_samples)
+    calc = HistoricalBaselineCalculator(
+        source, ndvi_source=ndvi_source, lookback_years=5, seasonal_window_days=21,
+        dense_vegetation_ndvi_threshold=0.6,
+    )
+
+    ref = asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
+
+    # S prahem 0.6 (NDVI vzorky jsou 0.45) se nic nevyřadí -> wet_db tažené
+    # vzhůru k -4.0 (95. percentil z poloviny scén na -4.0).
+    assert ref.dense_vegetation_scenes_excluded == 0
+    assert ref.wet_db > -8.0
+    assert ref.dense_vegetation_ndvi_threshold_used == 0.6
+
+
+def test_threshold_used_is_none_without_ndvi_source():
+    """Bez ndvi_source se dense_vegetation_ndvi_threshold_used nehlásí jako
+    použitý - hradlo vůbec neběželo, žádný práh se neaplikoval."""
+    scenes = _seasonal_scenes([2021, 2022, 2023, 2024, 2025], 10, lambda y, i: -12.0)
+    source = FakeDataSource(scenes)
+    calc = HistoricalBaselineCalculator(source, lookback_years=5, seasonal_window_days=21)
+
+    ref = asyncio.run(calc.compute(MOCK_GEOMETRY, as_of_date=AS_OF))
+
+    assert ref.dense_vegetation_ndvi_threshold_used is None
+    assert ref.ndvi_gated is False
