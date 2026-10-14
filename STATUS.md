@@ -1,15 +1,29 @@
 # PhasQ — stav a plán
 
-Živý dokument, aktualizovaný průběžně. Poslední update: 2026-10-01.
+Živý dokument, aktualizovaný průběžně. Poslední update: 2026-10-14 (bezpečnostní audit).
 
 ---
 
-## ⚠️ Nejvyšší priorita — vyřešit před čímkoliv dalším
+## Bezpečnostní audit 2026-10-14
 
-1. **`phasq-engine` nemá vůbec žádný GitHub remote.** Čistě lokální repo na tomhle Macu, nulová záloha.
-2. **Appka (`phasq_app`) má 4 commity jen lokálně** na branchi `phasq-engine-integration` (bezpečnostní oprava, napojení enginu, DB opravy, Esri→free náhrada) — na `origin/main` ani na případném Vercelu nejsou.
-3. **Rozpor "500 ha pilot" z investorského decku** — nikdy jsem neviděl, odkud to číslo je. Realita: jedno pole, jedna analýza, žádný skutečný farmář appku nepoužil. Potřeba vyřešit dřív, než deck uvidí další investor.
-4. **Leaknuté heslo v `phasq-master` repu** — pořád veřejně viditelné, čeká na potvrzení k odstranění.
+**Hotovo (branch `security-hardening` v phasq-engine i phasq_app, pushnuto, NEmergnuto):**
+- `PetrZakcs/phasq` (veřejné repo s hardcoded hesly/JWT klíči) → **privátní**. Živě ověřeno: Render backend neexistuje, Python API na Vercelu vrací 404 → přihlášení `password123` nikde živě nedostupné. Hodnoty z historie přesto brát jako kompromitované.
+- phasq_app: RLS migrace `20261014000000_security_hardening.sql` (uživatel si dřív mohl sám nastavit tarif/kvótu, přepsat výsledek analýzy, padělat audit), atomický start analýzy, auth na všech `/api/*`, odstraněn OpenAI orchestrator + natvrdo datum 2026-06-09, bezpečnostní hlavičky.
+- phasq-engine: fail-closed auth (`compare_digest`), validace vstupů (data, Polygon, limit 2000 ha všude, `lookback_years` ≤ 30), upstream chyby jen do logu, sdílený CDSE token.
+
+**Čeká na Petra:**
+- Spustit migraci `20261014` na produkční Supabase + nastavit `SUPABASE_SERVICE_ROLE_KEY` (Vercel + `.env.local`) — **bez toho appka po merge nespustí analýzu**.
+- Ověřit RLS na tabulce `waitlist` (projekt webu phasq.com) — v repu je `disable_rls.sql`.
+- Rozhodnout o simulovaných analýzách (NDVI/NDWI/PolSAR/InSAR generují vymyšlená agronomická doporučení), falešném „API klíči“ v nastavení a mock PDF.
+
+---
+
+## ⚠️ Dřívější priority (stav k 2026-10-14)
+
+1. ~~`phasq-engine` nemá GitHub remote~~ — vyřešeno, privátní `PetrZakcs/phasq-engine`.
+2. Appka: integrace enginu pořád jen na branchi `phasq-engine-integration`, `main` pozadu, nic nenasazeno.
+3. **Rozpor "500 ha pilot" z investorského decku** — pořád otevřené.
+4. ~~Leaknuté heslo v `phasq-master` repu veřejně~~ — repo zprivatizováno 2026-10-14; rotace secretů viz výš.
 
 ---
 

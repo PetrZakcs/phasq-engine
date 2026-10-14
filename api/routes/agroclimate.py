@@ -27,7 +27,7 @@ router = APIRouter()
 async def agroclimate_summary(req: AgroclimateRequest):
     lat, lon = geometry_centroid(req.geometry)
     source = NasaPowerWeatherSource()
-    as_of_year = int(req.as_of_date[:4])
+    as_of_year = int(req.as_of_date[:4])  # formát ověřen v AgroclimateRequest
 
     try:
         current = await source.get_daily_weather(lat, lon, req.season_start, req.as_of_date)

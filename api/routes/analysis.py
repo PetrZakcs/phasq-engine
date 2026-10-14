@@ -1,8 +1,10 @@
 """
-Fáze 1 spike endpoint: reálná Ïƒâ° čísla z CDSE, bez DB persistence.
+Fáze 1 spike endpoint: reálná σ⁰ čísla z CDSE, bez DB persistence.
 Supabase integrace (status persistence, quota enforcement, audit log) je
 Fáze 3 dle master_plan.md — záměrně zde chybí, ne opomenuto.
 """
+
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -18,6 +20,7 @@ from engine.physics.radiometric import RadiometricAnalyzer
 from utils.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/analyze/radiometric", dependencies=[Depends(verify_internal_secret)])
@@ -47,10 +50,9 @@ async def analyze_radiometric(req: RadiometricAnalysisRequest):
     except MaxAOIExceeded as e:
         raise HTTPException(status_code=400, detail=str(e))
     except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"CDSE API error {e.response.status_code}: {e.response.text[:500]}",
-        )
+        # Text odpovědi CDSE jen do logu, ne klientovi (audit 2026-10-14).
+        logger.error("CDSE Statistical API %s: %s", e.response.status_code, e.response.text[:1000])
+        raise HTTPException(status_code=502, detail=f"CDSE API error {e.response.status_code}")
 
     # Lokální dry/wet baseline (viz docs/ADR-002-local-baseline.md) — bez ní
     # dává globální fallback fyzikálně chybné výsledky (ověřeno živě proti

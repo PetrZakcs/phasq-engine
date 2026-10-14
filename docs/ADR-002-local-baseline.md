@@ -44,7 +44,7 @@ který zdroj byl použit (`local_baseline` vs `global_fallback`).
 
 ## Výsledek po opravě (živě ověřeno)
 
-| | mean Ïƒâ° | reference | moisture % | severity |
+| | mean σ⁰ | reference | moisture % | severity |
 |---|---|---|---|---|
 | Před (global) | -10.24 dB | -22/-8 (fixní) | 84.0 % | none |
 | Po (local, 365d, 188 scén) | -10.24 dB | -13.72/-8.66 (lokální) | 68.8 % | mild |
@@ -94,7 +94,7 @@ danou chvíli, ne proto, že platí.
 
 Hypotéza po nálezu z předchozí sekce: `HistoricalBaselineCalculator` bral
 prostý rolling 365denní lookback, který u kontrolního pole namíchal do
-percentilu měsíce s Ïƒâ° kolem -4 až -6 dB (srpen–říjen 2025) — extrémně
+percentilu měsíce s σ⁰ kolem -4 až -6 dB (srpen–říjen 2025) — extrémně
 vysoké, typické pro hustou vegetaci v plné biomase (objemový rozptyl, ne
 vlhkost), zatímco duben–srpen 2026 mělo -10 až -12 dB, srovnatelné se
 suchým polem. Potvrzeno měsíčním rozpadem historie obou polí.
@@ -115,7 +115,7 @@ Sezónní korekce je nutná podmínka, ne dostatečná.
 ## Metodologický obrat: relative_moisture_pct není cross-field metrika
 
 Klíčové zjištění, který posunul celé vyšetřování: **syrová data byla celou
-dobu ve správném směru.** Aktuální Ïƒâ° kontrolního pole (-8,61 dB) je
+dobu ve správném směru.** Aktuální σ⁰ kontrolního pole (-8,61 dB) je
 skutečně méně záporné (vlhčí) než suchého pole (-10,24 dB) — to je fyzikálně
 správně. Problém nebyl v datech ani ve volbě okna. Problém byl v testu
 samotném: `relative_moisture_pct` je z podstaty **relativní anomálie vůči

@@ -33,7 +33,7 @@ class Sentinel1CDSESource(DataSource):
     COLLECTION_ID = "sentinel-1-grd"
 
     def __init__(self, client_id: str, client_secret: str, token_url: str, stats_api_url: str):
-        self._token_provider = CDSETokenProvider(client_id, client_secret, token_url)
+        self._token_provider = CDSETokenProvider.shared(client_id, client_secret, token_url)
         self._stats_api_url = stats_api_url
 
     async def _get_token(self) -> str:

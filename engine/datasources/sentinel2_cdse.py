@@ -3,7 +3,7 @@ Sentinel-2 L2A NDVI přes CDSE Statistical API — vegetační hradlo pro
 RadiometricAnalyzer/HistoricalBaselineCalculator (viz docs/ADR-002-local-baseline.md,
 sekce "Co je skutečně potřeba k uzavření").
 
-Ïƒâ° backscatter samotné neumí rozlišit "mokrá půda" od "hustá vegetace v plné
+σ⁰ backscatter samotné neumí rozlišit "mokrá půda" od "hustá vegetace v plné
 biomase" — obojí zvyšuje radarový odraz, ale z různé fyziky (dielektrická
 konstanta vody vs. objemový rozptyl na listové ploše). NDVI z optického
 Sentinel-2 tohle rozliší. Používáme ho k VYŘAZENÍ scén s hustou vegetací
@@ -56,7 +56,7 @@ class Sentinel2NDVISource:
     typical_resolution_m = 10.0
 
     def __init__(self, client_id: str, client_secret: str, token_url: str, stats_api_url: str):
-        self._token_provider = CDSETokenProvider(client_id, client_secret, token_url)
+        self._token_provider = CDSETokenProvider.shared(client_id, client_secret, token_url)
         self._stats_api_url = stats_api_url
 
     async def get_ndvi_series(self, geometry: dict, date_start: str, date_end: str) -> list[NDVISample]:

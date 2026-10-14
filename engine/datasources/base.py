@@ -19,7 +19,7 @@ import numpy as np
 @dataclass
 class ROIStats:
     """
-    Server-side zredukované statistiky Ïƒâ° (dB) přes AOI pro jednu scénu.
+    Server-side zredukované statistiky σ⁰ (dB) přes AOI pro jednu scénu.
     Počítáno na straně zdroje (CDSE Statistical API), včetně speckle filtru
     aplikovaného PŘED redukcí — viz chyba #4 v master planu.
     """

@@ -16,6 +16,7 @@ struktura pole, ne prázdný/černý obrázek).
 
 import httpx
 
+from utils.cdse_auth import CDSETokenProvider
 from utils.reproject import reproject_geometry_to_utm
 
 PROCESS_API_URL_SUFFIX = "process"  # sdílí base URL se Statistical API, jiná cesta
@@ -33,27 +34,13 @@ function evaluatePixel(sample) {
 
 class Sentinel2TrueColorSource:
     def __init__(self, client_id: str, client_secret: str, token_url: str, stats_api_url: str):
-        # Sdílí OAuth flow se Sentinel1CDSESource, ale je to samostatná
-        # instance - jednodušší než sdílet token cache napříč zdroji teď,
-        # cena je jeden extra token request, ne architektonický problém.
-        self._client_id = client_id
-        self._client_secret = client_secret
-        self._token_url = token_url
+        # Sdílený token cache se Sentinel1/2 zdroji (utils/cdse_auth.py).
+        self._token_provider = CDSETokenProvider.shared(client_id, client_secret, token_url)
         # stats_api_url je tvaru .../api/v1/statistics - process API je na .../api/v1/process
         self._process_api_url = stats_api_url.rsplit("/", 1)[0] + "/" + PROCESS_API_URL_SUFFIX
 
     async def _get_token(self) -> str:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                self._token_url,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self._client_id,
-                    "client_secret": self._client_secret,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()["access_token"]
+        return await self._token_provider.get_token()
 
     async def get_truecolor_png(self, geometry: dict, date_start: str, date_end: str) -> bytes:
         token = await self._get_token()

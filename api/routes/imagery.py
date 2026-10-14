@@ -4,6 +4,8 @@ World_Imagery dlaždice (viz docs/ADR-005-free-data-sources.md — Esri
 komerční použití explicitně zakazuje bez vlastní licence).
 """
 
+import logging
+
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response
 
@@ -13,6 +15,7 @@ from engine.datasources.sentinel2_truecolor import Sentinel2TrueColorSource
 from utils.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/imagery/truecolor", dependencies=[Depends(verify_internal_secret)])
@@ -30,6 +33,7 @@ async def truecolor_image(req: TrueColorImageRequest):
     try:
         png_bytes = await source.get_truecolor_png(req.geometry, req.date_start, req.date_end)
     except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=502, detail=f"CDSE Process API error {e.response.status_code}: {e.response.text[:300]}")
+        logger.error("CDSE Process API %s: %s", e.response.status_code, e.response.text[:1000])
+        raise HTTPException(status_code=502, detail=f"CDSE Process API error {e.response.status_code}")
 
     return Response(content=png_bytes, media_type="image/png")

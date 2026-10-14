@@ -33,7 +33,7 @@ Zdroj: www.intersucho.cz, dotaz 2026-08-23 a 2026-08-30.
 
 ## 3. Klíčové srovnání: globální vs. lokální kalibrace (pole A)
 
-| | Ïƒâ° (aktuální) | Referenční škála | Vlhkost | Verdikt |
+| | σ⁰ (aktuální) | Referenční škála | Vlhkost | Verdikt |
 |---|---|---|---|---|
 | Globální konstanty (starý model) | -10,24 dB | -22 / -8 dB (fixní) | **84,0 %** | žádné riziko |
 | Lokální baseline (365 dní, 188 scén) | -10,24 dB | -13,72 / -8,66 dB | **68,8 %** | mírné sucho |
@@ -44,7 +44,7 @@ Analytické okno: 16.–30. 8. 2026, 6 scén Sentinel-1.
 
 ## 4. Živá Sentinel-1 časová řada — pole A, 16.–30. 8. 2026 (VV, dB)
 
-| Datum | Ïƒâ° VV (dB) |
+| Datum | σ⁰ VV (dB) |
 |---|---|
 | 2026-08-18 | -10,29 |
 | 2026-08-20 | -9,70 |
@@ -91,14 +91,14 @@ Před opravou: `resx`/`resy` parametry poslány v jednotkách EPSG:4326
 
 ## 8. NDVI ověření (Sentinel-2, pole B, anomální období)
 
-| Datum | Ïƒâ° VV (dB) | NDVI |
+| Datum | σ⁰ VV (dB) | NDVI |
 |---|---|---|
 | 2025-08-28 | -13,12 | 0,137 |
 | 2025-08-30 | -5,26 | 0,137 |
 | 2025-08-31 | -3,47 | 0,137 |
 | 2025-09-18 | -4,42 | 0,307 |
 
-NDVI nízké a klesající přesně v okamžiku extrémního nárůstu Ïƒâ° — vylučuje
+NDVI nízké a klesající přesně v okamžiku extrémního nárůstu σ⁰ — vylučuje
 hypotézu "hustá vegetace" jako příčinu.
 
 ---

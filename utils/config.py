@@ -18,6 +18,8 @@ class Settings:
 
     NEXT_JS_SECRET = os.environ.get("NEXT_JS_SECRET", "")
     ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+    # Jen pro lokální vývoj bez secretu - viz api/middleware.py (fail-closed).
+    ENGINE_ALLOW_NO_AUTH = os.environ.get("ENGINE_ALLOW_NO_AUTH", "") == "1"
 
     @property
     def cdse_configured(self) -> bool:

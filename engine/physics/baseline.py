@@ -12,7 +12,7 @@ reálném LPIS poli (35.6 ha orná půda, Havlíčkobrodsko) relative_moisture_p
 DRUHÁ oprava (živě ověřeno stejný den, viz ADR-002 "Sezónní kontaminace"):
 první verze tohohle modulu brala PROSTÝ rolling N-day lookback (365 dní).
 To selhalo na cross-region srovnání dvou polí — jedno z nich mělo v části
-roku (jiná sezóna, jiná plodina/fáze osevního postupu) Ïƒâ° kolem -4 až -6 dB
+roku (jiná sezóna, jiná plodina/fáze osevního postupu) σ⁰ kolem -4 až -6 dB
 (typické pro hustou vegetaci jako kukuřici v plné biomase — objemový
 rozptyl, ne vlhkost půdy), zatímco ve stejné sezóně jako aktuální analýza
 bylo -10 až -12 dB. Prostý 365denní percentil tuhle úplně jinou fyziku
@@ -29,7 +29,7 @@ obojí zvedá backscatter, jen z různé fyziky. Volitelný `ndvi_source`
 aktuálního okna — bez něj se chová jako dřív, s ním se do LocalReference
 zapisuje kolik scén to vyřadilo, transparentně, ne potichu.
 
-Metoda: pro dané AOI a datum stáhni Ïƒâ° scény ze stejného ±W-denního okna
+Metoda: pro dané AOI a datum stáhni σ⁰ scény ze stejného ±W-denního okna
 kolem stejného dne v roce, za posledních K let (bez aktuálního roku), a
 jako referenci vezmi nízký/vysoký percentil z TÉTO distribuce, ne mean.
 Percentil na dB hodnotách je v pořádku (order statistic, ne průměr —

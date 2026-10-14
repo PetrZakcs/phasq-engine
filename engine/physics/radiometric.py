@@ -1,5 +1,5 @@
 """
-Radiometrická analýza (vlhkost půdy) ze Sentinel-1 Ïƒâ° backscatteru.
+Radiometrická analýza (vlhkost půdy) ze Sentinel-1 σ⁰ backscatteru.
 Metoda: Change Detection (Bauer-Marschallinger et al. 2019), doi:10.3390/rs11050526
 
 PLATÍ PRO: zemědělská půda střední Evropy, VV polarizace, IW mode,
